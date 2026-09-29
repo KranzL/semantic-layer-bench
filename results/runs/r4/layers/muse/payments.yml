@@ -1,0 +1,74 @@
+semantic_models:
+  - name: payments
+    description: One row per payment attempt against an invoice. Includes succeeded payments in every method (card, ach, wire) and failed attempts. Cash metrics include only succeeded payments; failed attempts moved no money and never count.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        description: The payment attempt. Primary key of fct_payments.
+        type: primary
+        expr: payment_id
+      - name: invoice
+        description: The invoice the payment was made against. Joins to the invoices model.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: The paying account, taken from the invoice. Joins to the accounts model for segment, region and currency slicing.
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        description: Date the payment was received. Cash collected is attributed to this date.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        description: Payment outcome. succeeded payments moved money and count as cash collected; failed attempts never count.
+        type: categorical
+      - name: method
+        description: Payment method, one of card, ach or wire. All methods count as cash collected.
+        type: categorical
+      - name: currency
+        description: ISO currency the payment was received in (USD, EUR, GBP, JPY). Amounts convert to USD at the receipt-date FX rate.
+        type: categorical
+    measures:
+      - name: collected_usd
+        description: Sum of gross cash received in USD at receipt-date FX. Includes succeeded card, ach and wire payments of external non-deleted accounts, at the full amount the customer paid including any tax passed through. Excludes failed payment attempts and internal or deleted accounts.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+  - name: credit_notes
+    description: One row per credit note (credit memo) issued against a paid invoice. Credits reduce what the customer owes and are the company record of refunds. Includes every reason (billing_error, downgrade_adjustment, goodwill and service_credit).
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        description: The credit note. Primary key of fct_credit_notes.
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        description: The invoice the credit was issued against. Joins to the invoices model.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: The credited account, taken from the invoice. Joins to the accounts model for segment, region and currency slicing.
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        description: Date the credit note was issued. Refunds are attributed to this date.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: reason
+        description: Reason for the credit, one of billing_error, downgrade_adjustment, goodwill or service_credit. All reasons count as refunds.
+        type: categorical
+      - name: currency
+        description: ISO currency the credit was issued in (USD, EUR, GBP, JPY). Amounts convert to USD at the issue-date FX rate.
+        type: categorical
+    measures:
+      - name: refunded_usd
+        description: Sum of credit note amounts in USD at issue-date FX. Includes every reason (billing_error, downgrade_adjustment, goodwill, service_credit) for external non-deleted accounts. Excludes internal or deleted accounts.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit

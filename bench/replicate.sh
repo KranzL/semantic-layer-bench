@@ -7,7 +7,7 @@ mkdir -p "$BASE/logs"
 ./setup_runtime.sh >> "$LOG" 2>&1
 todo="${BUILD_MODELS-muse haiku sonnet opus fable}"
 attempt=0
-while [ -n "$todo" ] && [ "$attempt" -lt 4 ]; do
+while [ -n "$todo" ] && [ "$attempt" -lt 40 ]; do
   attempt=$((attempt + 1))
   echo "BUILD attempt $attempt: $todo" >> "$LOG"
   for m in $todo; do

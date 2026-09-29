@@ -1,0 +1,93 @@
+semantic_models:
+  - name: invoices
+    description: One row per invoice. Includes subscription invoices (linked to a subscription) and one-time services invoices (no subscription), in every status (draft, open, paid, uncollectible and void). Finance metrics include only invoices actually issued to customers and exclude draft and void invoices.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        description: The invoice. Primary key of fct_invoices.
+        type: primary
+        expr: invoice_id
+      - name: account
+        description: The billed account. Joins to the accounts model for segment, region and currency slicing.
+        type: foreign
+        expr: account_id
+      - name: subscription
+        description: The subscription billed on subscription invoices, null on services invoices. Joins to the subscriptions model.
+        type: foreign
+        expr: subscription_id
+    dimensions:
+      - name: issued_date
+        description: Date the invoice was issued. Billings are attributed to this date.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: due_date
+        description: Date payment is due. Open invoices past this date are overdue but still count as billed.
+        type: time
+        expr: due_at
+        type_params:
+          time_granularity: day
+      - name: period_start
+        description: Start of the service period the invoice covers, inclusive.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: period_end
+        description: End of the service period the invoice covers, exclusive. Annual invoices span a full year.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        description: subscription for recurring seat invoices, services for one-time professional-services invoices. Both types count as billings.
+        type: categorical
+      - name: status
+        description: Invoice status. paid, open and uncollectible invoices were issued to customers and count as billings; draft (never issued) and void (canceled) never count.
+        type: categorical
+      - name: currency
+        description: ISO currency the invoice was issued in (USD, EUR, GBP, JPY). Amounts convert to USD at the issue-date FX rate.
+        type: categorical
+    measures:
+      - name: billed_usd
+        description: Sum of invoice net amounts in USD at issue-date FX. Includes paid, open and uncollectible subscription and services invoices for external non-deleted accounts. Excludes draft and void invoices, sales tax, and internal or deleted accounts.
+        agg: sum
+        expr: (subtotal_minor - discount_minor) / power(10, minor_unit_exponent) * usd_per_unit
+  - name: revenue_recognition
+    description: One row per invoice per calendar month in which revenue is recognized. Subscription invoices spread net of tax evenly across each day of their service period; services invoices recognize in full on the issue date. Includes rows for invoices in every status; finance metrics exclude draft and void invoices.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_month
+        description: Surrogate key for one invoice in one recognition month. Primary key of this model.
+        type: primary
+        expr: invoice_id || '_' || cast(recognized_month as varchar)
+      - name: invoice
+        description: The invoice whose revenue is recognized. Joins to the invoices model.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: The billed account. Joins to the accounts model for segment, region and currency slicing.
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        description: First day of the calendar month the revenue is recognized in. Recognized revenue is attributed to this month.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        description: subscription for recurring revenue spread over the service period, services for one-time revenue recognized on the issue date. Both types count as recognized revenue.
+        type: categorical
+      - name: status
+        description: Status of the source invoice. Revenue from paid, open and uncollectible invoices counts; revenue from draft (never issued) and void (canceled) invoices never counts.
+        type: categorical
+      - name: currency
+        description: ISO currency of the source invoice (USD, EUR, GBP, JPY). Amounts convert to USD at the invoice issue-date FX rate.
+        type: categorical
+    measures:
+      - name: recognized_usd
+        description: Sum of recognized revenue in USD at invoice issue-date FX. Includes subscription revenue spread over service periods and services revenue at issuance, for paid, open and uncollectible invoices of external non-deleted accounts. Excludes draft and void invoices, sales tax, and internal or deleted accounts.
+        agg: sum
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit
