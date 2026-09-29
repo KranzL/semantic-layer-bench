@@ -21,7 +21,18 @@ for l in open('$BASE/builds.jsonl'):
     r = json.loads(l)
     last[r['model']] = r
 print(' '.join(m for m in 'muse haiku sonnet opus fable'.split() if m not in last or last[m].get('limited')))")
+  void=$(../.venv/bin/python -c "
+import json, os
+last = {}
+p = '$BASE/builds.jsonl'
+if os.path.exists(p):
+    for l in open(p):
+        r = json.loads(l)
+        last[r['model']] = r
+print(' '.join(m for m in last if not last[m].get('limited') and not last[m].get('files')))")
   [ -n "$todo" ] && echo "BUILD limited, retrying in 30 min: $todo" >> "$LOG" && sleep 1800
+  [ -n "$void" ] && echo "BUILD void (no files), retrying now: $void" >> "$LOG"
+  todo="$(echo $todo $void)"
 done
 echo "BUILDS_DONE" >> "$LOG"
 while true; do
