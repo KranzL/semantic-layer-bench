@@ -1,0 +1,46 @@
+semantic_models:
+  - name: opportunities
+    description: "One row per sales opportunity. Includes new-business and expansion opportunities in open, closed_won, and closed_lost stages; bookings metrics filter to closed_won and win rate to closed opportunities on external non-deleted accounts."
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        description: "Unique opportunity. Includes every opportunity id in every stage; excludes nothing."
+        type: primary
+        expr: opportunity_id
+      - name: account
+        description: "Account the opportunity belongs to. Includes the link used to slice bookings by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        description: "Sales representative who owns the opportunity. Includes the owner link used to slice bookings and win rate by rep, team, or rep region; excludes nothing."
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        description: "Calendar date the opportunity closed, or the expected close date while still open. Includes the bookings event date for closed_won opportunities; excludes the creation date."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: opportunity_created_date
+        description: "Calendar date the opportunity was created. Includes the pipeline entry date; excludes the close date."
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+      - name: opportunity_type
+        description: "Opportunity kind: new for new business, expansion for upsell to an existing account. Includes the kind used to split total bookings from new bookings; excludes stage."
+        type: categorical
+      - name: stage
+        description: "Opportunity stage: open, closed_won, or closed_lost. Includes the stage used to count bookings on closed_won and win rate on closed_won plus closed_lost; excludes open pipeline from both."
+        type: categorical
+    measures:
+      - name: opportunity_amount_usd
+        description: "Sum of opportunity amounts in USD across all stages, types, and accounts. Includes every opportunity row; excludes nothing at the measure level because stage, type, and account filters are applied on the bookings metrics."
+        agg: sum
+        expr: amount_usd
+      - name: opportunity_count
+        description: "Count of opportunities across all stages, types, and accounts. Includes every opportunity row; excludes nothing at the measure level because stage and account filters are applied on the won and closed opportunity metrics."
+        agg: count
+        expr: opportunity_id

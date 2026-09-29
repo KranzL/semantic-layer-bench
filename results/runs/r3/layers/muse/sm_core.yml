@@ -1,0 +1,107 @@
+semantic_models:
+  - name: accounts
+    description: "One row per customer account including internal test accounts and soft-deleted accounts. Includes every account ever created. Slice finance metrics by segment, region, country, or billing currency through this model; paying-customer logic itself lives in the subscription models, which exclude internal and deleted accounts."
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        description: "Unique customer account. Includes active, internal, and soft-deleted accounts; excludes nothing at the entity level so filters can choose."
+        type: primary
+        expr: account_id
+    dimensions:
+      - name: account_name
+        description: "Display name of the account. Includes internal test names such as Relay QA accounts; excludes nothing."
+        type: categorical
+      - name: segment
+        description: "Sales segment of the account: SMB, MidMarket, or Enterprise. Includes the segment assigned at creation; excludes any later re-segmentation history."
+        type: categorical
+      - name: region
+        description: "Sales region of the account: NA, EMEA, APAC, or LATAM. Includes the region assigned at creation; excludes rep region, which can differ."
+        type: categorical
+      - name: country
+        description: "ISO country code of the account. Includes the country assigned at creation; excludes billing or shipping address detail."
+        type: categorical
+      - name: billing_currency
+        description: "ISO currency code the account is billed in. Includes the account-level default currency; excludes the invoice or payment currency, which is stored per transaction."
+        type: categorical
+      - name: is_internal
+        description: "True for Relay-owned test accounts used for QA. Includes the internal flag used to exclude test data from finance metrics; excludes nothing."
+        type: categorical
+      - name: is_deleted
+        description: "True for soft-deleted accounts. Includes the deleted flag used to exclude deleted accounts from finance metrics; excludes nothing."
+        type: categorical
+      - name: parent_account_id
+        description: "Parent account for child accounts in a corporate hierarchy, null for standalone accounts. Includes the hierarchy link; excludes rollups, which are not computed."
+        type: categorical
+      - name: created_date
+        description: "Calendar date the account was created. Includes all accounts; excludes subscription start, which can be later."
+        type: time
+        type_params:
+          time_granularity: day
+
+  - name: plans
+    description: "One row per subscription plan. Includes monthly and annual plans across Starter, Growth, Scale, and Enterprise families. Excludes per-seat pricing history, which lives on subscription versions."
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        description: "Unique subscription plan. Includes every plan id referenced by subscription versions; excludes nothing."
+        type: primary
+        expr: plan_id
+    dimensions:
+      - name: plan_name
+        description: "Display name of the plan, for example Growth or Growth Annual. Includes the plan label; excludes the family grouping, which is plan_family."
+        type: categorical
+      - name: plan_family
+        description: "Plan family: Starter, Growth, Scale, or Enterprise. Includes the grouping across monthly and annual variants; excludes billing interval detail."
+        type: categorical
+      - name: billing_interval
+        description: "How the plan bills: month or year. Includes the interval used to normalize unit prices to monthly MRR; excludes the invoice period, which follows the subscription."
+        type: categorical
+
+  - name: sales_reps
+    description: "One row per sales representative. Includes every rep referenced by opportunities across all four sales teams. Excludes quota and compensation data."
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        description: "Unique sales representative. Includes every rep id referenced by opportunities; excludes nothing."
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_name
+        description: "Display name of the sales representative. Includes all reps; excludes team assignment, which is team."
+        type: categorical
+      - name: team
+        description: "Sales team of the rep: NA Sales, EMEA Sales, APAC Sales, or LATAM Sales. Includes current team assignment; excludes team history."
+        type: categorical
+      - name: region
+        description: "Sales region of the rep: NA, EMEA, APAC, or LATAM. Includes the rep home region; excludes the account region, which can differ."
+        type: categorical
+      - name: hired_date
+        description: "Calendar date the rep was hired. Includes all reps; excludes termination data, which is not tracked."
+        type: time
+        expr: hired_at
+        type_params:
+          time_granularity: day
+
+  - name: subscription_current
+    description: "One row per subscription with its latest version attributes. Includes every subscription ever created, including trialing and canceled ones. Excludes month-by-month history, which lives in subscription_monthly."
+    model: ref('subscription_current')
+    entities:
+      - name: subscription
+        description: "Unique subscription. Includes every subscription id across all statuses; excludes nothing."
+        type: primary
+        expr: subscription_id
+      - name: account
+        description: "Account that owns the subscription. Includes the owning account link; excludes subscription-level pricing."
+        type: foreign
+        expr: account_id
+      - name: plan
+        description: "Plan on the latest subscription version. Includes the current plan link used to slice invoices and MRR by plan; excludes plan history."
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: currency
+        description: "ISO currency code of the subscription. Includes the contract currency used for FX conversion; excludes the account billing currency, which matches in practice."
+        type: categorical
+      - name: current_status
+        description: "Status of the latest subscription version: trialing, active, past_due, or canceled. Includes the latest status only; excludes historical statuses."
+        type: categorical

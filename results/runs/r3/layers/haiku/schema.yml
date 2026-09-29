@@ -1,0 +1,294 @@
+version: 2
+
+semantic_models:
+  - name: accounts_entity
+    model: accounts
+    description: Core account dimensions including geography, segment, and billing information.
+    defaults:
+      agg_time_dimension: created_date
+    measures:
+      - name: account_count
+        description: Count of unique accounts
+        agg: count_distinct
+        expr: account_id
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Unique account identifier
+      - name: region
+        type: categorical
+        expr: region
+        description: Geographic region (NA, EMEA, APAC, LATAM)
+      - name: segment
+        type: categorical
+        expr: segment
+        description: Customer segment (SMB, Mid-Market, Enterprise)
+      - name: created_date
+        type: time
+        expr: created_date
+        description: Account creation date
+
+  - name: subscription_metrics
+    model: subscription_months
+    description: Monthly subscription snapshots for MRR and ARR calculations.
+    defaults:
+      agg_time_dimension: month_end
+    measures:
+      - name: mrr_usd
+        description: Monthly Recurring Revenue in USD
+        agg: sum
+        expr: |
+          case
+            when status in ('active', 'trialing') then
+              (case
+                when billing_interval = 'month' then seats * unit_price_minor * (1.0 - discount_pct)
+                when billing_interval = 'year' then (seats * unit_price_minor * (1.0 - discount_pct)) / 12.0
+                else 0
+              end / power(10, minor_unit_exponent)) * usd_per_unit
+            else 0
+          end
+      - name: arr_usd
+        description: Annual Recurring Revenue in USD
+        agg: sum
+        expr: |
+          case
+            when status in ('active', 'trialing') then
+              (case
+                when billing_interval = 'month' then seats * unit_price_minor * (1.0 - discount_pct) * 12.0
+                when billing_interval = 'year' then seats * unit_price_minor * (1.0 - discount_pct)
+                else 0
+              end / power(10, minor_unit_exponent)) * usd_per_unit
+            else 0
+          end
+      - name: active_subscription_count
+        description: Count of active subscriptions
+        agg: count_distinct
+        expr: case when status = 'active' then subscription_id else null end
+      - name: paying_account_count
+        description: Count of accounts with active subscriptions
+        agg: count_distinct
+        expr: case when status in ('active', 'trialing') then account_id else null end
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: month_end
+        type: time
+        expr: month_end
+        description: Month-end date
+      - name: status
+        type: categorical
+        expr: status
+        description: Subscription status (active, trialing, canceled, past_due)
+      - name: billing_interval
+        type: categorical
+        expr: billing_interval
+        description: Billing frequency (month or year)
+
+  - name: invoices_fact
+    model: invoices
+    description: Invoices issued to customers for billing.
+    defaults:
+      agg_time_dimension: issued_date
+    measures:
+      - name: invoice_count
+        description: Count of invoices
+        agg: count_distinct
+        expr: invoice_id
+      - name: billings_usd
+        description: Total invoice amount in USD
+        agg: sum
+        expr: (total_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: Invoice type (subscription or services)
+      - name: status
+        type: categorical
+        expr: status
+        description: Invoice payment status
+      - name: issued_date
+        type: time
+        expr: issued_date
+        description: Invoice issue date
+
+  - name: payments_fact
+    model: payments
+    description: Payments received from customers.
+    defaults:
+      agg_time_dimension: received_date
+    measures:
+      - name: payment_count
+        description: Count of payments
+        agg: count_distinct
+        expr: payment_id
+      - name: cash_received_usd
+        description: Total payment amount in USD
+        agg: sum
+        expr: (amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: received_date
+        type: time
+        expr: received_date
+        description: Payment receipt date
+      - name: method
+        type: categorical
+        expr: method
+        description: Payment method
+
+  - name: credit_notes_fact
+    model: credit_notes
+    description: Credit notes and refunds issued to customers.
+    defaults:
+      agg_time_dimension: issued_date
+    measures:
+      - name: credit_note_count
+        description: Count of credit notes
+        agg: count_distinct
+        expr: credit_note_id
+      - name: refunds_usd
+        description: Total refund amount in USD
+        agg: sum
+        expr: (amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: issued_date
+        type: time
+        expr: issued_date
+        description: Credit note issue date
+
+  - name: revenue_fact
+    model: revenue_recognition
+    description: Revenue recognized by period following ASC 606.
+    defaults:
+      agg_time_dimension: recognized_month
+    measures:
+      - name: recognized_revenue_usd
+        description: Recognized revenue in USD
+        agg: sum
+        expr: (recognized_amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: recognized_month
+        type: time
+        expr: recognized_month
+        description: Revenue recognition month
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: Type of revenue (subscription or services)
+
+  - name: opportunities_fact
+    model: opportunities
+    description: Sales pipeline and bookings.
+    defaults:
+      agg_time_dimension: close_date
+    measures:
+      - name: opportunity_count
+        description: Count of opportunities
+        agg: count_distinct
+        expr: opportunity_id
+      - name: won_opportunities
+        description: Count of closed won opportunities
+        agg: count_distinct
+        expr: case when stage = 'closed_won' then opportunity_id else null end
+      - name: bookings_usd
+        description: Value of won opportunities in USD
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: opportunity_type
+        type: categorical
+        expr: opportunity_type
+        description: Opportunity type (new or expansion)
+      - name: stage
+        type: categorical
+        expr: stage
+        description: Sales stage (open, closed_won, closed_lost)
+      - name: close_date
+        type: time
+        expr: close_date
+        description: Opportunity close date
+
+  - name: usage_fact
+    model: usage
+    description: Billable usage events by account and day.
+    defaults:
+      agg_time_dimension: usage_date
+    measures:
+      - name: usage_quantity
+        description: Total usage quantity
+        agg: sum
+        expr: quantity
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: usage_date
+        type: time
+        expr: usage_date
+        description: Usage date
+      - name: event_type
+        type: categorical
+        expr: event_type
+        description: Type of billable event
+
+  - name: customer_cohorts
+    model: customer_monthly_status
+    description: Customer acquisition and churn tracking by month.
+    defaults:
+      agg_time_dimension: month_end
+    measures:
+      - name: new_customer_count
+        description: Accounts newly acquired this month
+        agg: count_distinct
+        expr: case when is_new_customer_month then account_id else null end
+      - name: churned_customer_count
+        description: Accounts churned this month
+        agg: count_distinct
+        expr: case when is_churned_customer_month then account_id else null end
+      - name: active_customer_count
+        description: Accounts with active subscriptions
+        agg: count_distinct
+        expr: case when has_active_subscription = 1 then account_id else null end
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Account reference
+      - name: month_end
+        type: time
+        expr: month_end
+        description: Month end date
+      - name: is_new_customer_month
+        type: categorical
+        expr: is_new_customer_month
+        description: First month with active subscription
+      - name: is_churned_customer_month
+        type: categorical
+        expr: is_churned_customer_month
+        description: Month when customer churned
+
+# Metrics to be defined once MetricFlow semantic model structure is confirmed

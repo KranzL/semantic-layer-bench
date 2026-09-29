@@ -1,0 +1,171 @@
+semantic_models:
+  - name: invoices
+    description: "One row per invoice issued. Includes subscription and services invoices in every status; the billings metric filters to issued invoices on external non-deleted accounts. Excludes payments and credit notes, which are separate models."
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        description: "Unique invoice. Includes every invoice id in every status; excludes nothing."
+        type: primary
+        expr: invoice_id
+      - name: account
+        description: "Account billed on the invoice. Includes the billed-account link used to slice billings by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+      - name: subscription
+        description: "Subscription billed on subscription invoices, null on services invoices. Includes the link used to slice billings by plan; excludes services invoices, which carry no subscription."
+        type: foreign
+        expr: subscription_id
+    dimensions:
+      - name: issued_date
+        description: "Calendar date the invoice was issued. Includes the billing event date; excludes due date, period start, and period end."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: due_date
+        description: "Calendar date payment is due. Includes the due date for collections analysis; excludes the billing event date."
+        type: time
+        expr: due_at
+        type_params:
+          time_granularity: day
+      - name: period_start
+        description: "First calendar day of the invoiced service period. Includes the period start for subscription and services invoices; excludes the issue date."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: period_end
+        description: "Last calendar day of the invoiced service period, exclusive end. Includes the period end used to spread subscription revenue; excludes the issue date."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        description: "Invoice kind: subscription or services. Includes both kinds in billings; excludes nothing."
+        type: categorical
+      - name: invoice_status
+        description: "Invoice status: draft, open, paid, uncollectible, or void. Includes the status used to exclude draft and void invoices from billings; excludes payment status detail."
+        type: categorical
+        expr: status
+      - name: invoice_currency
+        description: "ISO currency the invoice was issued in. Includes the transaction currency converted to USD at the issue-date FX rate; excludes the account billing currency."
+        type: categorical
+        expr: currency
+    measures:
+      - name: invoice_billed_usd
+        description: "Sum of invoiced amounts in USD, net of discounts and excluding tax, across all invoices in all statuses and accounts. Includes every invoice row; excludes nothing at the measure level because status and account filters are applied on the billings metric."
+        agg: sum
+        expr: (subtotal_minor - discount_minor) / power(10, minor_unit_exponent) * usd_per_unit
+
+  - name: payments
+    description: "One row per payment attempt against an invoice. Includes succeeded and failed attempts; the cash_collected metric filters to succeeded payments on external non-deleted accounts. Excludes invoices without payment attempts."
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        description: "Unique payment attempt. Includes succeeded and failed attempts; excludes nothing."
+        type: primary
+        expr: payment_id
+      - name: invoice
+        description: "Invoice the payment was applied to. Includes the paid-invoice link; excludes nothing."
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: "Account that paid, carried from the invoice. Includes the payer link used to slice cash by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        description: "Calendar date the payment was received. Includes the cash collection date; excludes the invoice issue date."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: payment_status
+        description: "Payment status: succeeded or failed. Includes the status used to exclude failed attempts from cash collected; excludes invoice status."
+        type: categorical
+        expr: status
+      - name: method
+        description: "Payment method: card, ach, or wire. Includes the tender type for cash analysis; excludes invoice or subscription attributes."
+        type: categorical
+      - name: payment_currency
+        description: "ISO currency the payment was received in. Includes the transaction currency converted to USD at the receipt-date FX rate; excludes the invoice currency."
+        type: categorical
+        expr: currency
+    measures:
+      - name: payment_amount_usd
+        description: "Sum of payment attempt amounts in USD, including sales tax collected with each payment, across succeeded and failed attempts in all accounts. Includes every payment row; excludes nothing at the measure level because status and account filters are applied on the cash_collected metric."
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+
+  - name: credit_notes
+    description: "One row per credit note issued against a paid subscription invoice. Includes all credit reasons on external non-deleted accounts. Excludes invoices without credit notes and payment refunds processed outside credit notes, of which there are none."
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: credited_date
+    entities:
+      - name: credit_note
+        description: "Unique credit note. Includes every credit note id; excludes nothing."
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        description: "Invoice the credit note was issued against. Includes the credited-invoice link; excludes nothing."
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: "Account credited, carried from the invoice. Includes the credited-account link used to slice refunds by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: credited_date
+        description: "Calendar date the credit note was issued. Includes the refund event date; excludes the original invoice issue date."
+        type: time
+        expr: issued_date
+        type_params:
+          time_granularity: day
+      - name: reason
+        description: "Credit reason: billing_error, downgrade_adjustment, goodwill, or service_credit. Includes all four reasons in refunds; excludes nothing."
+        type: categorical
+      - name: credit_currency
+        description: "ISO currency the credit note was issued in. Includes the transaction currency converted to USD at the issue-date FX rate; excludes the invoice currency."
+        type: categorical
+        expr: currency
+    measures:
+      - name: credit_amount_usd
+        description: "Sum of credit note amounts in USD across all reasons and accounts. Includes every credit note row; excludes nothing at the measure level because account filters are applied on the refunds metric."
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+
+  - name: revenue_recognition
+    description: "One row per invoice per calendar month in which revenue is recognized. Includes daily-prorated subscription revenue across each invoice period plus services revenue recognized in the issue month, for every invoice status; the recognized_revenue metric filters to non-void, non-draft invoices on external non-deleted accounts."
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    primary_entity: invoice
+    entities:
+      - name: invoice
+        description: "Invoice whose revenue is recognized in the row month. Includes the recognized-invoice link; excludes nothing."
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: "Account whose revenue is recognized. Includes the link used to slice recognized revenue by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        description: "First calendar day of the month in which the revenue is recognized. Includes the recognition month for prorated subscription and point-in-time services revenue; excludes the invoice issue month."
+        type: time
+        type_params:
+          time_granularity: month
+      - name: revenue_status
+        description: "Invoice status carried from the invoice: draft, open, paid, uncollectible, or void. Includes the status used to exclude void and draft invoices from recognized revenue; excludes recognition-specific adjustments, of which there are none."
+        type: categorical
+        expr: status
+      - name: recognized_currency
+        description: "ISO currency of the underlying invoice. Includes the transaction currency converted to USD at the invoice issue-date FX rate; excludes the account billing currency."
+        type: categorical
+        expr: currency
+    measures:
+      - name: recognized_amount_usd
+        description: "Sum of recognized revenue amounts in USD across all invoice statuses and accounts. Includes every recognition row; excludes nothing at the measure level because status and account filters are applied on the recognized_revenue metric."
+        agg: sum
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit

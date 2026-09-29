@@ -1,0 +1,134 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: >
+      One row per external billing account (the entity invoices, subscriptions and usage are
+      attached to). Includes soft-deleted accounts so their history stays in every metric;
+      excludes internal (employee / test) accounts, which are excluded from all Relay metrics.
+      A child account (parent_account_id set) belongs to the customer (logo) of its parent.
+    model: ref('sem_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: Billing account id (ACC-xxxxx). External accounts only.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo) this account rolls up to - its parent account if it has one, otherwise itself.
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Legal name of the billing account. Names are not unique; use the account entity id to identify an account.
+      - name: segment
+        type: categorical
+        description: Sales segment of this billing account itself (SMB, MidMarket, Enterprise). For the segment of the customer/logo use customer__segment.
+      - name: region
+        type: categorical
+        description: Geographic region of this billing account itself (NA, EMEA, APAC, LATAM). Not the sales team region.
+      - name: country
+        type: categorical
+        description: ISO country code of this billing account.
+      - name: billing_currency
+        type: categorical
+        description: Currency this account is invoiced in (USD, EUR, GBP, JPY).
+      - name: is_deleted
+        type: categorical
+        description: True if the account has since been soft-deleted in the product. Their historical activity is still included in metrics.
+      - name: is_child_account
+        type: categorical
+        description: True if the account is a child (subsidiary) account rolling up to a parent customer.
+      - name: account_created_date
+        type: time
+        expr: created_date
+        description: Date the account was created in the product (not the date it became a paying customer).
+        type_params:
+          time_granularity: day
+
+  - name: customers
+    description: >
+      One row per customer (logo): a top-level external account together with all of its child
+      accounts. Customer attributes are those of the top-level (parent) account. Internal accounts
+      are excluded; soft-deleted customers are included so history is preserved. Customer-count
+      metrics (paying customers, new customers, logo churn, ARPA) are counted at this level.
+    model: ref('sem_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+        description: Customer (logo) id, equal to the account id of the top-level account.
+    dimensions:
+      - name: customer_name
+        type: categorical
+        description: Name of the top-level account of the customer.
+      - name: segment
+        type: categorical
+        description: Sales segment of the customer, taken from its top-level account (SMB, MidMarket, Enterprise). Use this to slice customer counts, ARPA and churn by segment.
+      - name: region
+        type: categorical
+        description: Geographic region of the customer, taken from its top-level account (NA, EMEA, APAC, LATAM).
+      - name: country
+        type: categorical
+        description: ISO country code of the customer's top-level account.
+      - name: billing_currency
+        type: categorical
+        description: Invoicing currency of the customer's top-level account. Child accounts may bill in other currencies.
+      - name: is_deleted
+        type: categorical
+        description: True if the customer's top-level account has been soft-deleted.
+      - name: child_account_count
+        type: categorical
+        description: Number of child accounts under the customer (0 for single-account customers).
+      - name: customer_created_date
+        type: time
+        expr: created_date
+        description: Creation date of the customer's top-level account.
+        type_params:
+          time_granularity: day
+
+  - name: plans
+    description: >
+      Price book of subscription plans, one row per plan id. Monthly and annual variants of the
+      same plan family are separate plans.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: Plan id (e.g. PLN-GROWTH-M).
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Plan display name, distinguishing monthly from annual (e.g. Growth, Growth Annual).
+      - name: plan_family
+        type: categorical
+        description: Plan tier regardless of billing interval (Starter, Growth, Scale, Enterprise).
+      - name: billing_interval
+        type: categorical
+        description: How often the plan is billed - month or year.
+
+  - name: sales_reps
+    description: One row per sales rep, with the sales team they belong to.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: Sales rep id (REP-xxx).
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Sales rep full name.
+      - name: team
+        type: categorical
+        description: Sales team the rep belongs to (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      - name: region
+        type: categorical
+        description: Region covered by the rep's sales team. May differ from the customer's own region.
+      - name: hired_date
+        type: time
+        expr: hired_at
+        description: Date the rep was hired.
+        type_params:
+          time_granularity: day

@@ -1,0 +1,176 @@
+metrics:
+  - name: mrr
+    description: "Month-end monthly recurring revenue in USD. Includes seats times unit price less discount, divided by 12 for annual plans, converted at month-end FX rates, for active and past_due subscriptions on external non-deleted accounts. Excludes trials, canceled subscriptions, internal test accounts, soft-deleted accounts, usage charges, services, tax, and credits."
+    type: simple
+    type_params:
+      measure:
+        name: mrr
+
+  - name: arr
+    description: "Annualized recurring revenue in USD, defined as MRR times 12. Includes the same subscription base as mrr; excludes everything mrr excludes."
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    description: "Count of accounts with at least one active or past_due subscription at month-end. Includes external non-deleted accounts only; excludes trialing-only accounts, fully canceled accounts, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: paying_customers
+
+  - name: paying_subscriptions
+    description: "Count of active and past_due subscriptions at month-end. Includes subscriptions on external non-deleted accounts; excludes trialing and canceled subscriptions, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: paying_subscriptions
+
+  - name: arpa
+    description: "Average revenue per paying account in USD per month, defined as MRR divided by paying customers. Includes the same subscription base and account base as its inputs; excludes everything mrr and paying_customers exclude."
+    type: derived
+    type_params:
+      expr: mrr / paying_customers
+      metrics:
+        - name: mrr
+        - name: paying_customers
+
+  - name: new_customers
+    description: "Count of accounts in their first-ever paying month. Includes first-time conversions only; excludes reactivations of previously churned accounts, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: new_customers
+
+  - name: logo_churn
+    description: "Count of accounts that were paying at the prior month-end but are not paying at this month-end. Includes full logo churn only; excludes downgrades that stay paying, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: logo_churn
+
+  - name: prior_paying_customers
+    description: "Count of accounts that were paying at the prior month-end. Includes the denominator base for churn rate; excludes current-month status, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: prior_paying_customers
+
+  - name: churn_rate
+    description: "Share of prior month-end paying customers lost this month, defined as logo churn divided by prior paying customers. Includes full logo churn only; excludes downgrades that stay paying, internal test accounts, and soft-deleted accounts."
+    type: ratio
+    type_params:
+      numerator:
+        name: logo_churn
+      denominator:
+        name: prior_paying_customers
+
+  - name: billings
+    description: "Invoiced amounts in USD, net of discounts and excluding tax. Includes open, paid, and uncollectible subscription and services invoices on external non-deleted accounts; excludes draft and void invoices, tax, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: invoice_billed_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} IN ('open', 'paid', 'uncollectible')
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: recognized_revenue
+    description: "Recognized revenue in USD, net of discounts and excluding tax. Includes daily-prorated subscription revenue plus services revenue recognized at issue, on open, paid, and uncollectible invoices for external non-deleted accounts. Excludes void and draft invoices, tax, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: recognized_amount_usd
+    filter: |
+      {{ Dimension('invoice__revenue_status') }} NOT IN ('void', 'draft')
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: cash_collected
+    description: "Succeeded payment amounts in USD, gross of refunds and including sales tax collected. Includes succeeded card, ach, and wire payments on external non-deleted accounts; excludes failed attempts, credit notes and refunds, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: payment_amount_usd
+    filter: |
+      {{ Dimension('payment__payment_status') }} = 'succeeded'
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: refunds
+    description: "Credit note amounts in USD. Includes all reasons against paid subscription invoices on external non-deleted accounts; excludes internal test accounts and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: credit_amount_usd
+    filter: |
+      {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: billable_usage
+    description: "Billable API call quantities. Includes api_call events on external non-deleted accounts; excludes health_check monitoring pings, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: usage_quantity
+    filter: |
+      {{ Dimension('account__event_type') }} = 'api_call'
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: bookings
+    description: "Closed_won opportunity amounts in USD. Includes new-business and expansion wins on external non-deleted accounts; excludes open pipeline, closed_lost opportunities, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: new_bookings
+    description: "Closed_won new-business opportunity amounts in USD. Includes type new wins on external non-deleted accounts; excludes expansion wins, open pipeline, closed_lost opportunities, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      AND {{ Dimension('opportunity__opportunity_type') }} = 'new'
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: won_opportunities
+    description: "Count of closed_won opportunities. Includes new-business and expansion wins on external non-deleted accounts; excludes open pipeline, closed_lost opportunities, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: closed_opportunities
+    description: "Count of closed opportunities, won plus lost. Includes closed_won and closed_lost opportunities on external non-deleted accounts; excludes open pipeline, internal test accounts, and soft-deleted accounts."
+    type: simple
+    type_params:
+      measure:
+        name: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} IN ('closed_won', 'closed_lost')
+      AND {{ Dimension('account__is_internal') }} = false
+      AND {{ Dimension('account__is_deleted') }} = false
+
+  - name: win_rate
+    description: "Share of closed opportunities won, defined as won opportunities divided by closed opportunities. Includes new-business and expansion deals on external non-deleted accounts; excludes open pipeline, internal test accounts, and soft-deleted accounts."
+    type: ratio
+    type_params:
+      numerator:
+        name: won_opportunities
+      denominator:
+        name: closed_opportunities

@@ -1,0 +1,81 @@
+version: 2
+
+semantic_models:
+  - name: usage_daily
+    description: >
+      One row per non-internal account per day per event type
+      (sem_usage_daily), 2023-01-03 to 2025-06-30, with the account's
+      subscription status on that day. Two event types exist: api_call
+      (customer traffic, billable) and health_check (platform monitoring, never
+      billable). Usage is billable only on days the account had an active or
+      past_due subscription; trial usage is not billable. Internal accounts,
+      which generate a large share of raw traffic, are excluded.
+    model: ref('sem_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: usage_day_id
+        description: Surrogate key account_id | usage_date | event_type.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account that generated the usage; joins to accounts.
+      - name: calendar_date
+        type: foreign
+        expr: usage_date
+        description: Usage date; joins to fiscal_calendar.
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar day the events occurred.
+      - name: event_type
+        type: categorical
+        description: Either api_call (customer API traffic) or health_check (monitoring pings, not billable).
+      - name: subscription_status_on_date
+        type: categorical
+        description: >
+          Best subscription status the account held on the usage date: active,
+          past_due, trialing, canceled or no_subscription. When an account has
+          several subscriptions the most favourable status wins (active over
+          past_due over trialing over canceled).
+      - name: is_billable
+        type: categorical
+        description: True when event_type is api_call and the account was active or past_due that day.
+    measures:
+      - name: billable_usage
+        label: Billable usage (API calls)
+        agg: sum
+        expr: billable_quantity
+        description: >
+          Number of api_call events on days when the account had an active or
+          past_due subscription. Excludes health_check events, usage during
+          trials, usage after cancellation and internal accounts. Additive.
+      - name: api_calls
+        label: API calls (all)
+        agg: sum
+        expr: api_call_quantity
+        description: All api_call events by non-internal accounts regardless of subscription status, including trial usage. Excludes health checks.
+      - name: health_checks
+        label: Health checks
+        agg: sum
+        expr: health_check_quantity
+        description: Monitoring health_check events by non-internal accounts. Never billable.
+      - name: total_usage_events
+        label: Usage events (all types)
+        agg: sum
+        expr: quantity
+        description: All usage events of every type by non-internal accounts.
+      - name: accounts_with_usage
+        label: Accounts with usage
+        agg: count_distinct
+        expr: account_id
+        description: Distinct non-internal accounts that recorded any usage event in the period.
+      - name: accounts_with_billable_usage
+        label: Accounts with billable usage
+        agg: count_distinct
+        expr: case when is_billable and quantity > 0 then account_id end
+        description: Distinct accounts with at least one billable api_call in the period.

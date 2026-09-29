@@ -1,0 +1,232 @@
+version: 2
+
+# Recurring revenue and customer metrics. All are month-end snapshots unless
+# marked additive. Slice by account__segment, account__region,
+# account__country, account__billing_currency, subscription_month__currency,
+# plan__plan_family, plan__plan_name, subscription_month__billing_interval,
+# calendar_date__fiscal_year, calendar_date__fiscal_quarter.
+#
+# Snapshot metrics (mrr, arr, paying_customers, arpa, paid_seats ...) always
+# report the last month-end inside the requested metric_time period. Always
+# include metric_time (any grain) in the group-by; when adding fiscal
+# dimensions, combine them with metric_time, e.g.
+#   --group-by metric_time__quarter,calendar_date__fiscal_year_quarter
+# Grouping a snapshot metric by a fiscal dimension alone returns only the
+# latest month-end overall.
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD at month-end. Sum over active and
+      past_due subscriptions of seats x contracted per-seat price x
+      (1 - discount), with yearly plans divided by 12, converted at the
+      month-end FX rate. Excludes trials, canceled subscriptions, one-off
+      services, usage, tax and internal accounts. Snapshot metric: for a
+      quarter or year the last month-end of the period is reported.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD = MRR x 12 at month-end. Same inclusions
+      and exclusions as mrr. Snapshot metric.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: mrr_local_currency
+    label: MRR (contract currency)
+    description: >
+      MRR in the subscription's own currency (major units) with the same rules
+      as mrr. Only meaningful when grouped or filtered by currency; the total
+      across currencies mixes units.
+    type: simple
+    type_params:
+      measure: mrr_local
+
+  - name: paid_seats
+    label: Paid seats
+    description: >
+      Seats under contract on active and past_due subscriptions at month-end.
+      Excludes trial and canceled seats and internal accounts. Snapshot metric.
+    type: simple
+    type_params:
+      measure: paying_seats
+
+  - name: paying_subscriptions
+    label: Paying subscriptions
+    description: >
+      Number of subscriptions with status active or past_due at month-end. An
+      account with two subscriptions counts twice; use paying_customers for
+      accounts. Snapshot metric.
+    type: simple
+    type_params:
+      measure: paying_subscriptions
+
+  - name: trialing_subscriptions
+    label: Trialing subscriptions
+    description: Number of subscriptions in a free trial at month-end. Not part of MRR. Snapshot metric.
+    type: simple
+    type_params:
+      measure: trialing_subscriptions
+
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of billing accounts with at least one active or past_due
+      subscription at month-end. Excludes trial-only accounts, churned accounts
+      and internal accounts; child accounts count separately from their parent
+      (see paying_logos). Snapshot metric: for a quarter or year the last
+      month-end is reported.
+    type: simple
+    type_params:
+      measure: paying_customers
+
+  - name: paying_logos
+    label: Paying logos
+    description: >
+      Number of paying customer logos at month-end, rolling child accounts up
+      to their parent account so a corporate group counts once. Same paying
+      rule as paying_customers. Snapshot metric.
+    type: simple
+    type_params:
+      measure: paying_logos
+
+  - name: arpa
+    label: ARPA
+    description: >
+      Average revenue per account in USD per month = MRR / paying customers at
+      month-end. Both sides exclude trials, churned and internal accounts.
+      Snapshot metric.
+    type: ratio
+    type_params:
+      numerator: mrr_account_grain
+      denominator: paying_customers
+
+  - name: mrr_account_grain
+    label: MRR (account grain)
+    description: >
+      MRR in USD aggregated from the account-month table; identical in value to
+      mrr but cannot be sliced by plan. Exists as the numerator of arpa so both
+      sides share one grain. Snapshot metric.
+    type: simple
+    type_params:
+      measure: customer_mrr_usd
+
+  - name: new_customers
+    label: New customers
+    description: >
+      Accounts whose first-ever paying month is the period: the first month-end
+      at which the account has an active or past_due subscription. Trial signups
+      are not new customers until they convert; reactivations of previously
+      churned accounts are excluded. Excludes internal accounts. Additive
+      across months.
+    type: simple
+    type_params:
+      measure: new_customers
+
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: >
+      Accounts paying at month-end that were not paying at the prior month-end
+      and had paid before. Excludes first-time conversions. Additive.
+    type: simple
+    type_params:
+      measure: reactivated_customers
+
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Logo churn: accounts that were paying at the previous month-end and have
+      no active or past_due subscription at this month-end. Moving to past_due
+      or downgrading is not churn. Excludes internal accounts. Additive across
+      months.
+    type: simple
+    type_params:
+      measure: churned_customers
+
+  - name: customers_start_of_period
+    label: Customers at start of period
+    description: >
+      Paying customers at the previous month-end, i.e. the base exposed to churn.
+      For a quarter or year the first month-end of the period is used.
+      Denominator of logo_churn_rate.
+    type: simple
+    type_params:
+      measure: customers_start_of_period
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Churned customers during the period divided by paying customers at the
+      start of the period (fraction, 0.02 = 2%). Monthly by default; over a
+      quarter or year the numerator sums churn across the months and the
+      denominator is the customer count at the start of the first month.
+      Excludes internal accounts.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: customers_start_of_period
+
+  - name: new_mrr
+    label: New MRR
+    description: MRR in USD added by new customers in their first paying month. Additive.
+    type: simple
+    type_params:
+      measure: new_mrr_usd
+
+  - name: churned_mrr
+    label: Churned MRR
+    description: >
+      Prior month-end MRR in USD of accounts that churned in the period (gross
+      lost MRR from logo churn). Excludes contraction on retained accounts.
+      Additive.
+    type: simple
+    type_params:
+      measure: churned_mrr_usd
+
+  - name: mrr_churn_rate
+    label: MRR churn rate (logo)
+    description: >
+      Churned MRR in the period divided by MRR at the start of the period
+      (prior month-end MRR). Gross revenue churn from lost logos only; does not
+      include downgrades.
+    type: derived
+    type_params:
+      expr: churned_mrr / mrr_prior_month
+      metrics:
+        - name: churned_mrr
+        - name: mrr_account_grain
+          alias: mrr_prior_month
+          offset_window: 1 month
+
+  - name: net_new_mrr
+    label: Net new MRR
+    description: >
+      Change in MRR versus the previous month-end in USD (this month's MRR minus
+      last month's), capturing new, expansion, contraction and churn together.
+    type: derived
+    type_params:
+      expr: mrr - mrr_prior_month
+      metrics:
+        - name: mrr
+        - name: mrr
+          alias: mrr_prior_month
+          offset_window: 1 month
+
+  - name: mrr_growth_rate
+    label: MRR growth rate (MoM)
+    description: Net new MRR divided by the previous month-end MRR (fraction). Month-over-month growth of MRR.
+    type: derived
+    type_params:
+      expr: (mrr - mrr_prior_month) / mrr_prior_month
+      metrics:
+        - name: mrr
+        - name: mrr
+          alias: mrr_prior_month
+          offset_window: 1 month

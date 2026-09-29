@@ -1,0 +1,59 @@
+version: 2
+
+# dbt documentation for the helper models that back the semantic layer.
+# Build with: ./dbt build --select path:models/semantic
+
+models:
+  - name: sem_subscription_months
+    description: >
+      Subscription x month-end snapshot (2023-01-31 to 2025-06-30) for
+      non-internal accounts with MRR computed as seats x unit price x
+      (1 - discount) / 12-for-yearly, in contract currency and in USD at the
+      month-end FX rate. Only active and past_due rows carry MRR.
+    columns:
+      - name: subscription_month_id
+        description: Primary key subscription_id | month_end.
+        data_tests: [unique, not_null]
+      - name: mrr_usd
+        description: MRR in USD; zero for trialing and canceled rows.
+        data_tests: [not_null]
+
+  - name: sem_customer_months
+    description: >
+      Account x month-end grid for every non-internal account that ever had a
+      subscription, with paying / new / reactivated / churned flags derived from
+      consecutive month-ends. paying(t) = paying(t-1) + new + reactivated - churned.
+    columns:
+      - name: customer_month_id
+        description: Primary key account_id | month_end.
+        data_tests: [unique, not_null]
+
+  - name: sem_invoices
+    description: Invoices of non-internal accounts with major-unit and USD amounts (issue-date FX) and status flags.
+    columns:
+      - name: invoice_id
+        data_tests: [unique, not_null]
+
+  - name: sem_payments
+    description: Payment attempts on invoices of non-internal accounts with USD amounts at received-date FX.
+    columns:
+      - name: payment_id
+        data_tests: [unique, not_null]
+
+  - name: sem_credit_notes
+    description: Credit notes of non-internal accounts with USD amounts at issue-date FX.
+    columns:
+      - name: credit_note_id
+        data_tests: [unique, not_null]
+
+  - name: sem_revenue_recognition
+    description: Monthly recognized revenue per finalized invoice of non-internal accounts, in invoice currency and USD.
+    columns:
+      - name: revenue_recognition_id
+        data_tests: [unique, not_null]
+
+  - name: sem_usage_daily
+    description: Daily usage per non-internal account and event type with subscription status on the day and billable flag.
+    columns:
+      - name: usage_day_id
+        data_tests: [unique, not_null]

@@ -1,0 +1,100 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      One row per sales opportunity from fct_opportunities (no internal
+      accounts have opportunities, so no filtering is applied). Every
+      opportunity has an owning rep, an account, a type (new = first sale to
+      the account, expansion = upsell to an existing customer), a stage
+      (open, closed_won, closed_lost), an amount already expressed in USD and a
+      close date (actual for closed deals, expected for open ones). Bookings and
+      win rate are measured on close_date; pipeline creation on created_date.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity identifier.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Prospect or customer account; joins to accounts.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales rep; joins to sales_reps for team and sales region.
+      - name: calendar_date
+        type: foreign
+        expr: close_date
+        description: Close date; joins to fiscal_calendar.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Actual close date for closed_won / closed_lost; expected close date for open opportunities.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created in the CRM.
+      - name: opportunity_type
+        type: categorical
+        description: Either new (new logo / first contract) or expansion (additional seats or upgrade for an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        label: Bookings (USD)
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+        description: >
+          Total contract value in USD of opportunities closed-won, dated by close
+          date. Includes new and expansion deals. Excludes open and lost
+          opportunities. CRM amount, not invoiced amount.
+      - name: new_bookings_usd
+        label: New bookings (USD)
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then amount_usd else 0 end
+        description: Bookings from closed-won opportunities of type "new" (first contract with the account). Excludes expansion.
+      - name: expansion_bookings_usd
+        label: Expansion bookings (USD)
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'expansion' then amount_usd else 0 end
+        description: Bookings from closed-won opportunities of type "expansion" (upsell to an existing customer). Excludes new.
+      - name: opportunities_won
+        label: Opportunities won
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+        description: Count of opportunities in stage closed_won, by close date.
+      - name: opportunities_lost
+        label: Opportunities lost
+        agg: sum
+        expr: case when stage = 'closed_lost' then 1 else 0 end
+        description: Count of opportunities in stage closed_lost, by close date.
+      - name: opportunities_closed
+        label: Opportunities closed
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+        description: Count of closed opportunities (won plus lost), by close date. Open opportunities are excluded. Denominator of win_rate.
+      - name: open_pipeline_usd
+        label: Open pipeline (USD)
+        agg: sum
+        expr: case when stage = 'open' then amount_usd else 0 end
+        description: USD value of opportunities still open, dated by expected close date. Not bookings.
+      - name: opportunities_created
+        label: Opportunities created
+        agg: sum
+        expr: 1
+        agg_time_dimension: created_date
+        description: Count of opportunities created, dated by created_date (all stages and types).
+      - name: pipeline_created_usd
+        label: Pipeline created (USD)
+        agg: sum
+        expr: amount_usd
+        agg_time_dimension: created_date
+        description: USD amount of all opportunities created, dated by created_date, regardless of eventual outcome.

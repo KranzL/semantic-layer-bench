@@ -1,0 +1,270 @@
+version: 2
+
+# Recurring-revenue semantic models: subscription-month snapshots for MRR /
+# ARR / seats, and account-month snapshots for customer counts, new logos and
+# logo churn. Both are point-in-time at each calendar month-end, so their
+# snapshot measures are declared non-additive over time (MetricFlow takes the
+# last month-end inside the requested period instead of summing months).
+# Always group snapshot measures by metric_time; add fiscal dimensions
+# alongside metric_time rather than instead of it.
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      One row per subscription per calendar month-end from 2023-01-31 to
+      2025-06-30 (sem_subscription_months). The row reflects the subscription
+      version in force at 23:59 on the month-end date. Internal Relay-owned
+      accounts are excluded. Trialing and canceled subscriptions are present
+      with is_paying = false and zero MRR so that trial counts can be reported;
+      MRR, ARR and seat measures only count active and past_due subscriptions.
+      Amounts in USD use the FX rate on the month-end date.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_month_id
+        description: Surrogate key subscription_id | month_end.
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: Subscription identifier (SUB-xxxxxx). An account can hold more than one subscription.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that owns the subscription; joins to accounts.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan on the subscription version in force at month-end; joins to plans.
+      - name: calendar_date
+        type: foreign
+        expr: month_end
+        description: Month-end date; joins to fiscal_calendar for fiscal year / quarter.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: >
+          Last calendar day of the snapshot month (e.g. 2025-06-30). Group by
+          month_end__month or metric_time__month for monthly MRR.
+      - name: subscription_status
+        type: categorical
+        description: >
+          Status of the subscription version at month-end: active (billing
+          normally), past_due (contracted but latest invoice unpaid; still in
+          MRR), trialing (free trial, not in MRR) or canceled (ended, not in MRR).
+      - name: is_paying
+        type: categorical
+        description: True when subscription_status is active or past_due, i.e. the subscription contributes MRR.
+      - name: billing_interval
+        type: categorical
+        description: Billing cadence of the subscription's plan at month-end, "month" or "year". Annual contract values are divided by 12 for MRR.
+      - name: currency
+        type: categorical
+        description: Contract currency of the subscription (USD, EUR, GBP, JPY); same as the account's billing currency.
+      - name: discount_pct
+        type: categorical
+        description: Contractual discount fraction on the version in force (0.0 to 0.2), already applied in MRR.
+    measures:
+      - name: mrr_usd
+        label: MRR (USD)
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month-end: seats x contracted
+          per-seat price x (1 - discount) for the subscription version in force,
+          divided by 12 for yearly plans, converted at the month-end FX rate.
+          Includes active and past_due subscriptions only; excludes trialing and
+          canceled subscriptions, internal accounts, one-off services, tax and
+          usage. Point-in-time: over multi-month periods the last month-end is used.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: mrr_local
+        label: MRR (contract currency)
+        agg: sum
+        expr: mrr_local
+        description: >
+          Same definition as mrr_usd but left in the subscription's contract
+          currency (major units). Only meaningful when grouped or filtered by
+          currency; summing across currencies mixes units.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_seats
+        label: Paid seats
+        agg: sum
+        expr: paying_seats
+        description: >
+          Seats under contract on active and past_due subscriptions at
+          month-end. Excludes trial and canceled seats and internal accounts.
+          Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_subscriptions
+        label: Paying subscriptions
+        agg: sum
+        expr: case when is_paying then 1 else 0 end
+        description: >
+          Number of subscriptions with status active or past_due at month-end.
+          A customer with two subscriptions counts twice; see paying_customers
+          for accounts. Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: trialing_subscriptions
+        label: Trialing subscriptions
+        agg: sum
+        expr: case when is_trialing then 1 else 0 end
+        description: Number of subscriptions in a free trial at month-end (excluded from MRR). Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: contracted_monthly_amount_usd
+        label: Contracted monthly amount incl. trials (USD)
+        agg: sum
+        expr: contracted_monthly_amount_usd
+        description: >
+          Monthly-normalised contract value in USD for every non-canceled
+          subscription including trials, i.e. MRR plus the MRR that trialing
+          subscriptions would generate if converted. Excludes canceled
+          subscriptions and internal accounts. Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      One row per non-internal account per calendar month-end from 2023-01-31
+      to 2025-06-30 (sem_customer_months), for every account that has ever had
+      a subscription, including months before its first subscription and after
+      churn. An account is "paying" in a month when at least one of its
+      subscriptions is active or past_due at month-end. New, reactivated and
+      churned flags compare consecutive month-ends, so paying customers this
+      month = paying last month + new + reactivated - churned. Child accounts
+      are separate customers; customer_logo_id rolls them up to their parent.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+        description: Surrogate key account_id | month_end.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account; joins to accounts for segment, region, country and currency.
+      - name: calendar_date
+        type: foreign
+        expr: month_end
+        description: Month-end date; joins to fiscal_calendar.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Last calendar day of the snapshot month.
+      - name: customer_status
+        type: categorical
+        description: >
+          Lifecycle state at month-end: paying (has an active or past_due
+          subscription), trialing (only trial subscriptions), churned (paid in an
+          earlier month, not paying now), not_yet_paying (will pay in a later
+          month, not paying yet), never_paying (never reached a paid subscription).
+      - name: currency
+        type: categorical
+        description: Contract currency of the account's subscriptions (USD, EUR, GBP or JPY).
+    measures:
+      - name: paying_customers
+        label: Paying customers
+        agg: sum
+        expr: case when is_paying then 1 else 0 end
+        description: >
+          Number of distinct billing accounts with at least one active or
+          past_due subscription at month-end. Excludes accounts that are only
+          trialing, churned accounts and internal accounts. Child accounts count
+          separately from their parent. Point-in-time: over a quarter or year
+          the last month-end is used.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_logos
+        label: Paying logos (parent-level)
+        agg: count_distinct
+        expr: case when is_paying then customer_logo_id end
+        description: >
+          Number of distinct customer logos paying at month-end, where a child
+          account and its parent count as one logo (parent_account_id, or the
+          account itself when it has no parent). Same paying rule and exclusions
+          as paying_customers. Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: customers_start_of_period
+        label: Paying customers at start of period
+        agg: sum
+        expr: case when was_paying_prior_month then 1 else 0 end
+        description: >
+          Number of accounts that were paying at the previous month-end, i.e.
+          the customer base exposed to churn during the month. For a quarter or
+          year, the first month-end in the period is used, so this is the paying
+          customer count at the start of the period. Denominator of logo_churn_rate.
+        non_additive_dimension:
+          name: month_end
+          window_choice: min
+      - name: new_customers
+        label: New customers
+        agg: sum
+        expr: case when is_new_customer then 1 else 0 end
+        description: >
+          Accounts whose first-ever paying month (first month-end with an active
+          or past_due subscription) is this month. Trial starts do not count;
+          the account is new when the trial converts. Reactivations of previously
+          churned accounts are excluded (see reactivated_customers). Additive:
+          sums across months.
+      - name: reactivated_customers
+        label: Reactivated customers
+        agg: sum
+        expr: case when is_reactivated_customer then 1 else 0 end
+        description: >
+          Accounts paying at this month-end that were not paying at the previous
+          month-end and had paid in some earlier month. Excludes first-time
+          conversions (new_customers). Additive.
+      - name: churned_customers
+        label: Churned customers (logo churn)
+        agg: sum
+        expr: case when is_churned_customer then 1 else 0 end
+        description: >
+          Accounts that were paying at the previous month-end and have no active
+          or past_due subscription at this month-end (all subscriptions canceled
+          or ended). A move to past_due is not churn. Downgrades are not churn.
+          Excludes internal accounts. Additive: sums across months.
+      - name: new_mrr_usd
+        label: New MRR (USD)
+        agg: sum
+        expr: new_mrr_usd
+        description: MRR in USD contributed by new_customers in their first paying month. Additive.
+      - name: churned_mrr_usd
+        label: Churned MRR (USD)
+        agg: sum
+        expr: churned_mrr_usd
+        description: >
+          Previous month-end MRR in USD of accounts that churned this month
+          (the amount lost). Excludes contraction from downgrades on retained
+          accounts. Additive.
+      - name: customer_mrr_usd
+        label: MRR (USD, account grain)
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Same value as the mrr_usd measure, aggregated at account grain (sum of
+          the account's paying subscriptions). Used as the numerator of ARPA so
+          that numerator and denominator share one grain. Point-in-time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max

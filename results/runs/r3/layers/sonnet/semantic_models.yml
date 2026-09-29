@@ -1,0 +1,419 @@
+version: 2
+
+semantic_models:
+  - name: customers
+    description: >
+      One row per external customer. A customer is a parent account, or a standalone account without a parent;
+      child accounts roll up to their parent and take the parent's segment, region, country and billing currency.
+      Internal/test accounts (is_internal = true) are excluded entirely. Deleted accounts are kept.
+    model: ref('sem_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+        description: Customer identifier (the parent account id when the account has a parent, otherwise the account id).
+    dimensions:
+      - name: customer_name
+        type: categorical
+        description: Name of the customer (the parent account's name for rolled-up child accounts).
+      - name: segment
+        type: categorical
+        expr: customer_segment
+        description: >
+          Customer size segment (SMB, MidMarket, Enterprise) of the parent customer. A child account is reported
+          under its parent's segment, not its own.
+      - name: region
+        type: categorical
+        expr: customer_region
+        description: >
+          Customer sales region (NA, EMEA, APAC, LATAM) of the parent customer. A child account is reported under
+          its parent's region, not its own. This is the customer's region, not the sales rep's region.
+      - name: country
+        type: categorical
+        expr: customer_country
+        description: Two-letter country code of the parent customer.
+      - name: billing_currency
+        type: categorical
+        expr: customer_billing_currency
+        description: >
+          Billing currency (USD, EUR, GBP, JPY) recorded on the parent customer's account. For MRR by the currency
+          each subscription is actually billed in, use the subscription-level currency dimension instead.
+
+  - name: plans
+    description: >
+      Plan catalog, one row per plan (Starter, Growth, Scale monthly and annual, plus Enterprise annual).
+      Attributes only; list prices are not used in any metric.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: Plan identifier, for example PLN-GROWTH-M.
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Display name of the plan, for example Growth or Growth Annual.
+      - name: plan_family
+        type: categorical
+        description: Plan tier without the billing interval (Starter, Growth, Scale, Enterprise); monthly and annual plans of a tier share a family.
+      - name: billing_interval
+        type: categorical
+        description: Plan billing interval, month or year.
+
+  - name: sales_reps
+    description: One row per sales representative with the team and region they sell in.
+    model: ref('sem_sales_reps')
+    entities:
+      - name: rep
+        type: primary
+        expr: rep_id
+        description: Sales rep identifier, for example REP-001.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Full name of the sales rep.
+      - name: sales_team
+        type: categorical
+        description: Sales team of the rep (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      - name: rep_region
+        type: categorical
+        description: Region the rep sells in. May differ from the customer's region.
+
+  - name: subscription_months
+    description: >
+      Month-end snapshot of every subscription of external customers (2023-01-31 to 2025-06-30, one row per
+      subscription per month-end). Internal/test accounts are excluded. MRR is USD at the month-end FX rate:
+      seats x unit price x (1 - discount), with annual plans divided by 12. Only active and past_due subscriptions
+      are paying and carry MRR; trialing and canceled subscriptions have zero MRR and are not paying.
+      Snapshot measures must never be summed across month-ends.
+    model: ref('sem_subscription_months')
+    primary_entity: subscription
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+      - name: plan
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Month-end date of the snapshot the subscription state is measured at.
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: >
+          Subscription status at month-end: active, past_due, trialing or canceled. Only active and past_due are paying.
+      - name: currency
+        type: categorical
+        description: >
+          Currency the subscription is billed in (USD, EUR, GBP, JPY). MRR is always reported in USD regardless of
+          this dimension.
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the subscription's plan, month or year. Annual plans are normalized to monthly in MRR.
+      - name: is_paying
+        type: categorical
+        description: True for active and past_due subscriptions, false for trialing and canceled ones.
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month-end: seats x unit price x (1 - discount) at the month-end FX rate,
+          annual plans divided by 12. Includes active and past_due subscriptions of external customers; excludes
+          trialing, canceled, internal accounts, invoiced one-off services, usage, tax, and refunds. Semi-additive:
+          over several months it returns the value at the last month-end in the period, never a sum.
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_customers
+        description: >
+          Distinct customers (parent-rolled-up) with at least one active or past_due subscription at month-end.
+          Excludes trial-only customers, canceled customers and internal accounts. Semi-additive: over several months
+          it returns the count at the last month-end in the period.
+        agg: count_distinct
+        expr: paying_customer_id
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      Customer-level (parent-rolled-up) monthly lifecycle events derived from month-end paying status, for external
+      customers only. One row per customer per month-end where the customer is paying, plus a churn row at the first
+      month-end where a previously paying customer is no longer paying. A customer is paying at a month-end if it has
+      an active or past_due subscription. Reactivated customers are not counted as new again but can churn again.
+    model: ref('sem_customer_months')
+    primary_entity: customer
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Month-end date at which the lifecycle event is observed (for churn, the first month-end the customer is no longer paying).
+    measures:
+      - name: new_customers
+        description: >
+          Customers whose first ever paying month-end is this month-end. Excludes customers that only trialed,
+          reactivations of previously paying customers, and internal accounts. Additive over time.
+        agg: sum
+        expr: "case when is_new_customer then 1 else 0 end"
+      - name: churned_customers
+        description: >
+          Customers paying at the previous month-end and not paying at this month-end (all subscriptions canceled or
+          ended). Downgrades, seat reductions and trial cancellations that never paid are not churn. Additive over time.
+        agg: sum
+        expr: "case when is_churned then 1 else 0 end"
+      - name: opening_customers
+        description: >
+          Customers paying at the previous month-end, i.e. the start-of-month base for the churn rate. Summed over
+          several months it gives customer-months at risk, so the churn rate over a longer period is the average monthly rate.
+        agg: sum
+        expr: "case when is_opening_customer then 1 else 0 end"
+
+  - name: invoices
+    description: >
+      Issued invoices of external customers (status open, paid or uncollectible), subscription and services.
+      Draft and void invoices and internal accounts are excluded. Amounts are USD net of discount, excluding tax,
+      converted at the FX rate on the issue date.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the invoice was issued.
+      - name: invoice_type
+        type: categorical
+        description: subscription (recurring seat billing) or services (one-off professional services).
+      - name: invoice_status
+        type: categorical
+        expr: status
+        description: Invoice status, open, paid or uncollectible (draft and void are excluded from this model).
+      - name: currency
+        type: categorical
+        description: Currency the invoice was issued in (USD, EUR, GBP, JPY). Amounts are always reported in USD.
+    measures:
+      - name: billed_usd
+        description: >
+          Invoiced amount in USD: subtotal minus discount, excluding tax, at the issue-date FX rate. Includes open,
+          paid and uncollectible subscription and services invoices; excludes draft and void invoices, tax, credit
+          notes and internal accounts.
+        agg: sum
+        expr: billed_usd
+
+  - name: revenue
+    description: >
+      Recognized revenue per invoice per calendar month for external customers. Subscription invoices are recognized
+      evenly by day across their service period; services invoices are recognized in full on the issue date.
+      Only issued invoices (open, paid, uncollectible) count; draft and void invoices and internal accounts are
+      excluded. Amounts are USD net of discount, excluding tax, at the invoice-date FX rate.
+    model: ref('sem_revenue')
+    primary_entity: revenue_schedule
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: Calendar month in which the revenue is recognized (not the month invoiced or paid).
+      - name: invoice_type
+        type: categorical
+        description: subscription (recognized over the service period) or services (recognized on issue date).
+      - name: invoice_status
+        type: categorical
+        expr: status
+        description: Status of the source invoice, open, paid or uncollectible.
+      - name: currency
+        type: categorical
+        description: Currency the source invoice was issued in. Revenue is always reported in USD.
+    measures:
+      - name: recognized_usd
+        description: >
+          Recognized revenue in USD. Includes the portion of each issued invoice attributable to the month
+          (daily straight-line for subscriptions, on issue date for services), net of discount and excluding tax.
+          Excludes draft and void invoices, credit notes, unbilled usage and internal accounts.
+        agg: sum
+        expr: recognized_usd
+
+  - name: payments
+    description: >
+      Successful payments received from external customers. Failed payments and internal accounts are excluded.
+      Amounts are USD at the FX rate on the received date and include any tax on the paid invoice.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the payment was received.
+      - name: payment_method
+        type: categorical
+        expr: method
+        description: Payment method, card, ach or wire.
+      - name: currency
+        type: categorical
+        description: Currency of the payment (USD, EUR, GBP, JPY). Amounts are always reported in USD.
+    measures:
+      - name: cash_usd
+        description: >
+          Cash collected in USD: amount of succeeded payments at the received-date FX rate, including tax paid.
+          Excludes failed payments, refunds and credit notes, and internal accounts.
+        agg: sum
+        expr: cash_usd
+
+  - name: credit_notes
+    description: >
+      Credit notes issued against invoices of external customers. These are the refunds/credits in the warehouse
+      (there are no negative payments). Amounts are USD as recorded on the note at the issue-date FX rate.
+      Internal accounts are excluded.
+    model: ref('sem_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued.
+      - name: refund_reason
+        type: categorical
+        expr: reason
+        description: Reason on the credit note (billing_error, downgrade_adjustment, goodwill, service_credit).
+      - name: currency
+        type: categorical
+        description: Currency of the credit note. Amounts are always reported in USD.
+    measures:
+      - name: refund_usd
+        description: >
+          Refund / credit note amount in USD at the issue-date FX rate, as recorded on the note. Includes all
+          reasons; excludes internal accounts. It is not netted against billings, revenue or cash.
+        agg: sum
+        expr: refund_usd
+      - name: refund_count
+        description: Number of credit notes issued to external customers.
+        agg: sum
+        expr: "1"
+
+  - name: usage
+    description: >
+      Daily billable usage of external customers. Only api_call events are billable; health_check heartbeats
+      and all usage of internal/test accounts are excluded.
+    model: ref('sem_usage')
+    primary_entity: customer
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the usage occurred.
+    measures:
+      - name: billable_units
+        description: Number of billable API calls. Excludes health_check events and internal accounts.
+        agg: sum
+        expr: billable_units
+
+  - name: opportunities
+    description: >
+      Closed sales opportunities (closed_won and closed_lost) of external customers, dated by close date. Open
+      opportunities (future expected close dates) are excluded. amount_usd is the deal value in USD.
+      Types are new (new-logo) and expansion (existing customers).
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+      - name: rep
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was closed (won or lost).
+      - name: opportunity_type
+        type: categorical
+        description: new (new customer) or expansion (upsell to an existing customer).
+      - name: stage
+        type: categorical
+        description: Outcome, closed_won or closed_lost.
+    measures:
+      - name: won_amount_usd
+        description: >
+          USD value of closed_won opportunities of both types (new and expansion). Excludes closed_lost and open
+          opportunities and internal accounts.
+        agg: sum
+        expr: won_amount_usd
+      - name: closed_opportunities
+        description: Count of closed opportunities, won plus lost. Excludes open opportunities.
+        agg: sum
+        expr: "1"
+      - name: won_opportunities
+        description: Count of closed_won opportunities of both types.
+        agg: sum
+        expr: "case when is_won then 1 else 0 end"

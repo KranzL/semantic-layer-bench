@@ -1,0 +1,71 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      Sales opportunities, one row per opportunity, dated by close date (actual close date for
+      closed opportunities, expected close date for open ones). opportunity_type is new (new
+      logo) or expansion (upsell to an existing customer). Amounts are the contract value in USD
+      as recorded in the CRM.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity id (OPP-xxxxxx).
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account the opportunity is for.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) of the account.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales rep; use sales_rep__team for the sales team.
+    dimensions:
+      - name: close_date
+        type: time
+        description: Date the opportunity closed (won or lost), or its expected close date if still open.
+        type_params:
+          time_granularity: day
+      - name: created_date
+        type: time
+        description: Date the opportunity was created.
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the close date (Feb 1 - Jan 31, named for the ending calendar year).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the close date, formatted 'FY2025 Q1' (FY Q1 = Feb-Apr).
+      - name: opportunity_type
+        type: categorical
+        description: new (new-logo deal) or expansion (additional seats / upgrade for an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        description: >
+          Sum of amount_usd on closed_won opportunities (new and expansion), dated by close date.
+          Excludes open and closed_lost opportunities.
+        agg: sum
+        expr: "case when stage = 'closed_won' then amount_usd else 0 end"
+      - name: won_opportunities
+        description: Count of closed_won opportunities, dated by close date. Excludes open and closed_lost.
+        agg: sum
+        expr: "case when stage = 'closed_won' then 1 else 0 end"
+      - name: closed_opportunities
+        description: Count of closed opportunities (closed_won plus closed_lost), dated by close date. Excludes open opportunities.
+        agg: sum
+        expr: "case when stage in ('closed_won', 'closed_lost') then 1 else 0 end"
+      - name: open_pipeline_usd
+        description: Sum of amount_usd on opportunities still open, dated by expected close date. Excludes closed opportunities.
+        agg: sum
+        expr: "case when stage = 'open' then amount_usd else 0 end"

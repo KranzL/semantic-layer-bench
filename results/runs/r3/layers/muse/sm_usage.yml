@@ -1,0 +1,26 @@
+semantic_models:
+  - name: usage
+    description: "One row per account per usage date per event type with summed event quantity. Includes billable api_call events and non-billable health_check monitoring events; the billable_usage metric filters to api_call events on external non-deleted accounts."
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    primary_entity: account
+    entities:
+      - name: account
+        description: "Account that generated the usage. Includes the link used to slice usage by segment, region, or currency and to exclude internal and deleted accounts; excludes nothing."
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: usage_date
+        description: "Calendar date the usage events occurred. Includes the usage event date; excludes invoice or subscription dates."
+        type: time
+        type_params:
+          time_granularity: day
+      - name: event_type
+        description: "Usage event kind: api_call for billable customer API calls, health_check for internal monitoring pings. Includes the kind used to exclude health_check events from billable usage; excludes nothing."
+        type: categorical
+    measures:
+      - name: usage_quantity
+        description: "Sum of usage event quantities across all event types and accounts. Includes every usage row; excludes nothing at the measure level because event-type and account filters are applied on the billable_usage metric."
+        agg: sum
+        expr: quantity

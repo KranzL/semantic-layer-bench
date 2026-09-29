@@ -1,0 +1,134 @@
+version: 2
+
+metrics:
+  # ---------------------------------------------------------------- usage
+  - name: billable_usage
+    label: Billable usage
+    description: >
+      Number of api_call events by usage date on days when the account had an
+      active or past_due subscription. Excludes health_check events, usage
+      during free trials, usage after cancellation and internal accounts.
+      Slice by account__segment, account__region, plan is not available
+      (usage is at account grain). Additive.
+    type: simple
+    type_params:
+      measure: billable_usage
+
+  - name: api_calls
+    label: API calls (all)
+    description: All api_call events by non-internal accounts including trial and post-cancellation usage. Excludes health checks.
+    type: simple
+    type_params:
+      measure: api_calls
+
+  - name: health_checks
+    label: Health checks
+    description: Monitoring health_check events by non-internal accounts. Never billable.
+    type: simple
+    type_params:
+      measure: health_checks
+
+  - name: accounts_with_billable_usage
+    label: Accounts with billable usage
+    description: Distinct accounts with at least one billable api_call in the period.
+    type: simple
+    type_params:
+      measure: accounts_with_billable_usage
+
+  - name: billable_usage_per_account
+    label: Billable usage per active account
+    description: Billable API calls divided by the number of accounts with billable usage in the period.
+    type: ratio
+    type_params:
+      numerator: billable_usage
+      denominator: accounts_with_billable_usage
+
+  # ---------------------------------------------------------------- sales
+  # Slice by sales_rep__sales_team, sales_rep__sales_region, sales_rep__rep_name,
+  # opportunity__opportunity_type, account__segment, account__region,
+  # calendar_date__fiscal_year, calendar_date__fiscal_quarter.
+  - name: bookings
+    label: Bookings
+    description: >
+      USD contract value of opportunities closed-won, by close date. Includes
+      new and expansion deals. Excludes open and lost opportunities. CRM
+      amounts, so bookings will not tie exactly to billings or MRR.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings
+    description: Bookings from closed-won opportunities of type "new" (first contract with an account), by close date. Excludes expansion.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: Bookings from closed-won opportunities of type "expansion" (upsell to an existing customer), by close date. Excludes new.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+
+  - name: opportunities_won
+    label: Opportunities won
+    description: Count of closed-won opportunities by close date, all types.
+    type: simple
+    type_params:
+      measure: opportunities_won
+
+  - name: opportunities_lost
+    label: Opportunities lost
+    description: Count of closed-lost opportunities by close date, all types.
+    type: simple
+    type_params:
+      measure: opportunities_lost
+
+  - name: opportunities_closed
+    label: Opportunities closed
+    description: Count of opportunities closed (won plus lost) by close date. Open opportunities are excluded.
+    type: simple
+    type_params:
+      measure: opportunities_closed
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Closed-won opportunities divided by all closed opportunities (won plus
+      lost) by close date, as a fraction. Open opportunities are excluded from
+      both sides. Count-based, not amount-weighted; filter
+      opportunity__opportunity_type = 'new' for new-logo win rate.
+    type: ratio
+    type_params:
+      numerator: opportunities_won
+      denominator: opportunities_closed
+
+  - name: average_deal_size
+    label: Average deal size
+    description: Bookings divided by opportunities won in the period, in USD per closed-won deal.
+    type: ratio
+    type_params:
+      numerator: bookings
+      denominator: opportunities_won
+
+  - name: open_pipeline
+    label: Open pipeline
+    description: USD value of opportunities still open, dated by their expected close date. Not bookings.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd
+
+  - name: opportunities_created
+    label: Opportunities created
+    description: Count of opportunities created by created_date, all stages and types.
+    type: simple
+    type_params:
+      measure: opportunities_created
+
+  - name: pipeline_created
+    label: Pipeline created
+    description: USD amount of all opportunities created by created_date, regardless of eventual outcome.
+    type: simple
+    type_params:
+      measure: pipeline_created_usd

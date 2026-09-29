@@ -1,0 +1,173 @@
+version: 2
+
+# Billing, revenue and cash metrics. All in USD, all excluding internal
+# accounts, all additive across time. Slice by account__segment,
+# account__region, account__billing_currency, invoice__invoice_type,
+# invoice__currency, payment__payment_method, credit_note__credit_reason,
+# calendar_date__fiscal_year, calendar_date__fiscal_quarter.
+
+metrics:
+  - name: billings
+    label: Billings
+    description: >
+      Amount invoiced in USD by invoice issue date: subtotal minus discounts,
+      before tax, for finalized invoices (open, paid or uncollectible).
+      Includes subscription and one-off services invoices. Excludes draft and
+      void invoices, tax, credit notes and internal accounts. Annual plans are
+      billed up front so billings are lumpier than recognized revenue.
+    type: simple
+    type_params:
+      measure: billings_usd
+
+  - name: billings_including_tax
+    label: Billings incl. tax
+    description: Billings plus invoiced tax, i.e. the gross total customers were asked to pay. Finalized invoices only.
+    type: simple
+    type_params:
+      measure: billings_including_tax_usd
+
+  - name: invoiced_tax
+    label: Invoiced tax
+    description: Sales tax / VAT charged on finalized invoices, in USD. Pass-through, not revenue.
+    type: simple
+    type_params:
+      measure: invoiced_tax_usd
+
+  - name: invoiced_discounts
+    label: Invoiced discounts
+    description: Discounts granted on finalized invoices, in USD (already netted out of billings).
+    type: simple
+    type_params:
+      measure: invoiced_discounts_usd
+
+  - name: uncollectible_billings
+    label: Uncollectible billings
+    description: Billings (net, before tax) on invoices later written off as uncollectible, in USD, by issue date. Subset of billings.
+    type: simple
+    type_params:
+      measure: uncollectible_billings_usd
+
+  - name: open_billings
+    label: Open billings
+    description: Billings (net, before tax) on invoices issued but not yet paid or written off, in USD, by issue date. Subset of billings.
+    type: simple
+    type_params:
+      measure: open_billings_usd
+
+  - name: invoices_issued
+    label: Invoices issued
+    description: Count of finalized invoices (open, paid, uncollectible) by issue date. Excludes draft and void.
+    type: simple
+    type_params:
+      measure: invoices_issued
+
+  - name: refunds
+    label: Refunds and credits
+    description: >
+      Value of credit notes issued in USD by issue date, all reasons
+      (billing_error, downgrade_adjustment, goodwill, service_credit). Credit
+      notes are the only way money is returned or credited to customers in this
+      warehouse; there are no negative payments. Excludes void invoices and
+      internal accounts. Slice by credit_note__credit_reason to separate
+      cash-back refunds from service credits.
+    type: simple
+    type_params:
+      measure: refunds_usd
+
+  - name: credit_notes_issued
+    label: Credit notes issued
+    description: Count of credit notes issued by issue date.
+    type: simple
+    type_params:
+      measure: credit_notes_issued
+
+  - name: net_billings
+    label: Net billings
+    description: >
+      Billings minus refunds and credits in USD: what customers were invoiced
+      net of discounts, before tax, less credit notes issued in the same period.
+      Both parts exclude draft/void invoices and internal accounts.
+    type: derived
+    type_params:
+      expr: billings - refunds
+      metrics:
+        - name: billings
+        - name: refunds
+
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: >
+      Revenue recognized in USD by recognition month. Subscription invoices are
+      recognized evenly by day over their service period (an annual invoice
+      spreads over 12 months); services invoices are recognized in the month
+      issued. Net of discounts, before tax. Includes open, paid and
+      uncollectible invoices (write-offs are bad debt, not revenue reversals);
+      excludes draft and void invoices, credit notes and internal accounts.
+      FX is fixed at the invoice issue date.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+
+  - name: recognized_revenue_local_currency
+    label: Recognized revenue (invoice currency)
+    description: Recognized revenue in the invoice currency with the same rules as recognized_revenue. Only meaningful per currency.
+    type: simple
+    type_params:
+      measure: recognized_revenue_local
+
+  - name: cash_collected
+    label: Cash collected
+    description: >
+      Succeeded payments in USD by the date received, converted at that day's
+      FX rate. Includes tax because customers pay the gross invoice total.
+      Excludes failed payment attempts, credit notes (which are not cash
+      movements here) and internal accounts.
+    type: simple
+    type_params:
+      measure: cash_collected_usd
+
+  - name: cash_collected_local_currency
+    label: Cash collected (payment currency)
+    description: Cash collected in the payment currency with the same rules as cash_collected. Only meaningful per currency.
+    type: simple
+    type_params:
+      measure: cash_collected_local
+
+  - name: failed_payment_amount
+    label: Failed payment amount
+    description: USD value of failed payment attempts by attempt date. Not cash; every affected invoice was later paid successfully.
+    type: simple
+    type_params:
+      measure: failed_payment_amount_usd
+
+  - name: payments_succeeded
+    label: Successful payments
+    description: Count of succeeded payment transactions by received date.
+    type: simple
+    type_params:
+      measure: payments_succeeded
+
+  - name: payments_failed
+    label: Failed payments
+    description: Count of failed payment attempts by attempt date.
+    type: simple
+    type_params:
+      measure: payments_failed
+
+  - name: payment_failure_rate
+    label: Payment failure rate
+    description: Failed payment attempts divided by all payment attempts (fraction). Excludes internal accounts.
+    type: ratio
+    type_params:
+      numerator: payments_failed
+      denominator: payment_attempts
+
+  - name: payment_attempts
+    label: Payment attempts
+    description: Count of all payment attempts, succeeded plus failed, by date.
+    type: derived
+    type_params:
+      expr: payments_succeeded + payments_failed
+      metrics:
+        - name: payments_succeeded
+        - name: payments_failed

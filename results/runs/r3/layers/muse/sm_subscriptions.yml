@@ -1,0 +1,101 @@
+semantic_models:
+  - name: subscription_monthly
+    description: "One row per subscription per calendar month-end from 2023-01 through 2025-06 with normalized monthly recurring revenue in USD. Includes all statuses; rows that are trialing or canceled, or belong to internal or soft-deleted accounts, carry mrr_usd of zero and sub_is_paying of zero so that plain sums equal finance MRR."
+    model: ref('subscription_monthly')
+    defaults:
+      agg_time_dimension: snapshot_month
+    primary_entity: subscription
+    entities:
+      - name: subscription
+        description: "Subscription this monthly snapshot row belongs to. Includes all subscriptions; excludes nothing."
+        type: foreign
+        expr: subscription_id
+      - name: account
+        description: "Account that owns the subscription. Includes the owning account link used to slice MRR by segment, region, or currency; excludes nothing."
+        type: foreign
+        expr: account_id
+      - name: plan
+        description: "Plan in effect on the version active at month-end. Includes the month-end plan link used to slice MRR by plan, family, or billing interval; excludes the latest plan when it changed later."
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: snapshot_month
+        description: "Last calendar day of the snapshot month. Includes one value per month from 2023-01-31 through 2025-06-30; excludes intra-month changes, which are not visible until month-end."
+        type: time
+        expr: month_end
+        type_params:
+          time_granularity: day
+      - name: subscription_status
+        description: "Subscription version status at month-end: trialing, active, past_due, or canceled. Includes the status used to decide paying rows; excludes statuses from other months."
+        type: categorical
+        expr: status
+      - name: subscription_currency
+        description: "ISO contract currency of the subscription. Includes the currency converted to USD via the month-end FX rate; excludes the account billing currency."
+        type: categorical
+        expr: currency
+      - name: sub_is_paying
+        description: "1 when the row counts toward finance MRR, else 0. Includes active and past_due rows on external non-deleted accounts; excludes trialing rows, canceled rows, internal test accounts, and soft-deleted accounts."
+        type: categorical
+        expr: is_paying
+    measures:
+      - name: mrr
+        description: "Sum of month-end monthly recurring revenue in USD. Includes seats times unit price less discount, divided by 12 for annual plans, converted at the month-end FX rate, for active and past_due subscriptions on external non-deleted accounts. Excludes trials, canceled subscriptions, internal test accounts, soft-deleted accounts, usage charges, services, tax, and credits."
+        agg: sum
+        expr: mrr_usd
+      - name: paying_subscriptions
+        description: "Count of subscription-month rows that count toward finance MRR. Includes active and past_due subscriptions on external non-deleted accounts; excludes trialing and canceled subscriptions, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: is_paying
+
+  - name: customer_months
+    description: "One row per account per calendar month-end from 2023-01 through 2025-06 with paying, new-customer, and churn flags. Includes every account in every month; internal and soft-deleted accounts always carry zeros so that plain sums equal finance customer counts."
+    model: ref('customer_months')
+    defaults:
+      agg_time_dimension: customer_month
+    primary_entity: account
+    entities:
+      - name: account
+        description: "Account this monthly status row belongs to. Includes every account; excludes nothing."
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: customer_month
+        description: "Last calendar day of the snapshot month. Includes one value per month from 2023-01-31 through 2025-06-30; excludes intra-month conversions and cancels."
+        type: time
+        expr: month_end
+        type_params:
+          time_granularity: day
+      - name: customer_is_paying
+        description: "1 when the account has at least one active or past_due subscription at month-end, else 0. Includes external non-deleted accounts only; excludes trialing-only accounts, fully canceled accounts, internal test accounts, and soft-deleted accounts."
+        type: categorical
+        expr: is_paying
+      - name: is_new_paying
+        description: "1 in the first month the account ever counted as paying, else 0. Includes first-time conversions only; excludes reactivations of previously churned accounts, internal test accounts, and soft-deleted accounts."
+        type: categorical
+      - name: is_churned
+        description: "1 when the account counted as paying at the prior month-end but not at this month-end, else 0. Includes full logo churn only; excludes downgrades that stay paying, internal test accounts, and soft-deleted accounts."
+        type: categorical
+      - name: was_paying_prev
+        description: "1 when the account counted as paying at the prior month-end, else 0. Includes the churn-rate denominator base; excludes the current month status."
+        type: categorical
+    measures:
+      - name: account_mrr_usd
+        description: "Sum of account-level month-end MRR in USD, identical in total to the subscription-grain mrr measure. Includes active and past_due subscription value on external non-deleted accounts; excludes trials, canceled subscriptions, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: mrr_usd
+      - name: paying_customers
+        description: "Count of accounts with at least one active or past_due subscription at month-end. Includes external non-deleted accounts only; excludes trialing-only accounts, fully canceled accounts, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: is_paying
+      - name: new_customers
+        description: "Count of accounts in their first-ever paying month. Includes first-time conversions only; excludes reactivations, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: is_new_paying
+      - name: logo_churn
+        description: "Count of accounts that were paying at the prior month-end but are not paying at this month-end. Includes full logo churn only; excludes downgrades that stay paying, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: is_churned
+      - name: prior_paying_customers
+        description: "Count of accounts that were paying at the prior month-end. Includes the denominator base for churn rate; excludes current-month status, internal test accounts, and soft-deleted accounts."
+        agg: sum
+        expr: was_paying_prev
