@@ -1,0 +1,40 @@
+version: 2
+
+semantic_models:
+  - name: revenue_recognition
+    description: Revenue recognized per ASC 606.
+    defaults:
+      agg_time_dimension: recognized_month
+    model: ref('fct_revenue_recognition')
+    entities:
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: primary
+        role: identifier
+        expr: account_id
+    measures:
+      - name: recognized_revenue_minor
+        agg: sum
+        expr: recognized_amount_minor
+        description: Monthly recognized revenue in minor currency units following ASC 606
+      - name: recognized_revenue_usd
+        agg: sum
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        description: Monthly recognized revenue in USD
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        expr: recognized_month
+        description: Month in which revenue was recognized
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: Type of invoice - subscription (daily recognition) or services (upfront recognition)
+      - name: status
+        type: categorical
+        expr: status
+        description: Invoice status

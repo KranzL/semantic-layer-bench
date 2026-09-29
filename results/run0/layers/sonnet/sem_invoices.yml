@@ -1,0 +1,62 @@
+semantic_models:
+  - name: sem_invoices
+    description: >
+      One row per invoice (both recurring subscription invoices and
+      one-time services invoices). Amounts are converted to USD using the
+      fx rate as of the invoice's issue date. Includes invoices for
+      Relay's internal/test accounts at the row level; the billings metric
+      excludes them via a join to the account's is_internal flag.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: subscription_id
+        type: foreign
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The calendar date the invoice was issued.
+      - name: invoice_type
+        type: categorical
+        description: "subscription (recurring seat-based charge for a billing period) or services (one-time, e.g. onboarding or professional services)."
+      - name: status
+        type: categorical
+        description: "draft (not yet finalized/sent), open (sent, awaiting payment), paid (fully paid), uncollectible (written off as bad debt) or void (canceled, never valid)."
+      - name: currency
+        type: categorical
+        description: "The invoice's billing currency (USD, EUR, GBP or JPY). Dollar measures on this model are already converted to USD; this dimension is for slicing by original invoice currency."
+    measures:
+      - name: invoice_amount_usd
+        agg: sum
+        expr: (subtotal_minor - discount_minor) * usd_per_unit / power(10, minor_unit_exponent)
+        description: >
+          Invoiced amount in USD, net of line-item discounts and before tax
+          (excludes tax_minor), for every invoice regardless of status
+          (including draft and void). Always used together with a status
+          filter (via the billings metric) since draft invoices are not yet
+          finalized and void invoices were never valid -- summing this
+          measure directly would overstate billings.
+
+metrics:
+  - name: billings
+    description: >
+      Total amount invoiced to customers, in USD, net of discounts and
+      excluding tax. Includes open, paid and uncollectible invoices
+      (i.e. every invoice that was actually finalized and sent,
+      regardless of whether it has since been paid or written off).
+      Excludes draft invoices (not yet finalized), void invoices
+      (canceled, never valid) and Relay's internal/test accounts. This
+      is billed amount, not cash received (see cash_collected) and not
+      the ratable recognized amount (see recognized_revenue).
+    type: simple
+    type_params:
+      measure: invoice_amount_usd
+    filter: |
+      {{ Dimension('invoice_id__status') }} in ('open', 'paid', 'uncollectible')
+      and not {{ Dimension('account_id__is_internal') }}

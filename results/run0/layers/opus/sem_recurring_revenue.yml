@@ -1,0 +1,162 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      Month-end snapshot of paying subscriptions: one row per subscription per calendar month (Jan 2023 – Jun 2025)
+      whose subscription version in effect on the last day of the month has status active or past_due. Excludes
+      trialing and canceled subscriptions and Relay-internal accounts. If two versions overlap on a month end, only
+      the latest one is used. snapshot_month is the first day of the month but represents the state at month end.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: snapshot_month
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_month_id
+        description: One subscription in one month (subscription_id|month_end).
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: Subscription id.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that owns the subscription.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account) the subscription rolls up to.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan in effect at month end.
+    dimensions:
+      - name: snapshot_month
+        type: time
+        description: Calendar month of the snapshot (first day of month); values reflect the subscription state on the last day of that month.
+        type_params:
+          time_granularity: month
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: Subscription status at month end — active or past_due (past_due = payment overdue but not yet canceled, still counted as paying).
+      - name: plan_family
+        type: categorical
+        description: Product tier in effect at month end (Starter, Growth, Scale, Enterprise).
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the plan in effect at month end (month or year).
+      - name: currency
+        type: categorical
+        description: Currency the subscription is priced and billed in (USD, EUR, GBP, JPY).
+      - name: has_discount
+        type: categorical
+        expr: discount_pct > 0
+        description: True if the subscription carries a contractual percentage discount at month end.
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month end: seats × contracted unit price × (1 − discount), with
+          annual-plan prices divided by 12, converted at the month-end FX rate. Excludes tax, trials, canceled
+          subscriptions, one-off services, usage and internal accounts. Semi-additive: over multi-month periods the
+          value of the last month in the period is used.
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paid_seats
+        description: >
+          Number of seats on paying (active or past_due) subscriptions at month end. Excludes trial seats and
+          internal accounts. Semi-additive: last month in the period.
+        agg: sum
+        expr: seats
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_subscriptions
+        description: >
+          Number of paying (active or past_due) subscriptions at month end, excluding trials and internal
+          accounts. Semi-additive: last month in the period.
+        agg: sum
+        expr: "1"
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      One row per customer (top-level parent account, subsidiaries rolled up) per calendar month in which the
+      customer was paying at month end and/or at the previous month end. A customer is paying if any of its or its
+      subsidiaries' subscriptions is active or past_due at month end. Trials never make a customer paying.
+      Relay-internal accounts are excluded. Months run Jan 2023 – Jun 2025; every customer paying in Jan 2023 is
+      treated as new that month because billing history starts then.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: snapshot_month
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+        description: One customer in one month (customer_id|month_end).
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+    dimensions:
+      - name: snapshot_month
+        type: time
+        description: Calendar month (first day of month); paying status is evaluated on the last day of that month and of the prior month.
+        type_params:
+          time_granularity: month
+      - name: is_paying
+        type: categorical
+        description: True if the customer had at least one active or past_due subscription at this month end.
+    measures:
+      - name: paying_customers
+        description: >
+          Count of customers with at least one active or past_due subscription at month end (subsidiaries rolled up
+          into their parent, internal accounts and trial-only customers excluded). Semi-additive: over multi-month
+          periods the count at the end of the last month is used.
+        agg: sum
+        expr: paying_flag
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: customers_at_period_start
+        description: >
+          Count of customers that were paying at the end of the month before the period started (the opening
+          customer base). Semi-additive: over multi-month periods the opening count of the first month is used.
+          Denominator of logo churn rate.
+        agg: sum
+        expr: prior_month_paying_flag
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: min
+      - name: new_customers
+        description: >
+          Customers paying at this month end for the first time ever (first month with an active or past_due
+          subscription; converting from trial counts in the month they first pay). Excludes returning customers who
+          had paid before (see reactivated_customers). Additive over time.
+        agg: sum
+        expr: new_flag
+      - name: reactivated_customers
+        description: >
+          Customers paying at this month end who were not paying at the prior month end but had paid in some earlier
+          month (win-backs). Not included in new_customers. Additive over time.
+        agg: sum
+        expr: reactivated_flag
+      - name: churned_customers
+        description: >
+          Customers paying at the prior month end with no active or past_due subscription at this month end (logo
+          churn). A customer only churns when all its and its subsidiaries' subscriptions have ended; downgrades and
+          canceled trials are not churn. Additive over time.
+        agg: sum
+        expr: churned_flag
+      - name: churned_mrr_usd
+        description: >
+          Prior-month-end MRR (USD) of customers that churned in the month. Excludes contraction from customers that
+          are still paying. Additive over time.
+        agg: sum
+        expr: case when churned_flag = 1 then prior_month_mrr_usd else 0 end

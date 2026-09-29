@@ -1,0 +1,195 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: One row per subscription per calendar month-end from 2023-01 through 2025-06. Includes every subscription of external, non-deleted accounts in every status (active, past_due, trialing, canceled). Excludes internal test and demo accounts and deleted accounts entirely. The mrr_usd column holds normalized monthly recurring revenue in USD for active and past_due rows and is zero for trialing and canceled rows.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: row_key
+        description: Unique key for one subscription in one month. Includes the subscription id and the month-end date. Used only as the row grain.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Last calendar day of the month this snapshot row describes. Includes every month-end from 2023-01-31 through 2025-06-30. Excludes days that are not month-ends.
+      - name: subscription_id
+        type: categorical
+        description: Subscription identifier. Includes one value per subscription contract. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Owning account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record, which can differ from the subscription transaction currency. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: Subscription status at month-end (active, past_due, trialing, canceled). Includes all four statuses. MRR measures count only active and past_due.
+      - name: plan_id
+        type: categorical
+        description: Price plan identifier active that month. Includes all seven plans. Excludes nothing.
+      - name: plan_name
+        type: categorical
+        description: Price plan display name (Starter, Starter Annual, Growth, Growth Annual, Scale, Scale Annual, Enterprise). Includes all plans. Excludes nothing.
+      - name: plan_family
+        type: categorical
+        description: Plan family grouping monthly and annual variants (Starter, Growth, Scale, Enterprise). Includes all families. Excludes nothing.
+      - name: billing_interval
+        type: categorical
+        description: Contract billing cadence (month or year). Includes both. Annual prices are divided by 12 in MRR.
+      - name: seats
+        type: categorical
+        description: Paid seats on the subscription that month. Includes all seat counts of one or more. Excludes zero-seat rows, of which there are none.
+      - name: discount_pct
+        type: categorical
+        description: Contractual discount fraction applied to list price, from 0 to below 1. Includes negotiated discounts. Excludes invoice-level adjustments, which live on invoices instead.
+      - name: currency
+        type: categorical
+        description: Subscription transaction currency (USD, EUR, GBP, JPY). Includes the currency the subscription is priced in. Excludes nothing.
+    measures:
+      - name: mrr_usd_total
+        description: Sum of month-end MRR in USD. Includes seats times unit price less discount, normalized to monthly (annual divided by 12), converted at the month-end FX rate, for active and past_due subscriptions of external, non-deleted accounts. Excludes trialing and canceled subscriptions, internal test and demo accounts, deleted accounts, taxes, usage charges, and services.
+        agg: sum
+        expr: mrr_usd
+
+  - name: account_months
+    description: One row per account per calendar month-end from the month of the account first subscription through 2025-06. Includes only external, non-deleted accounts. Excludes internal test and demo accounts, deleted accounts, and months before an account first subscription. Carries paying, new-customer, and churn flags computed from consecutive-month subscription status.
+    model: ref('sem_account_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account_month
+        type: primary
+        expr: row_key
+        description: Unique key for one account in one month. Includes the account id and the month-end date. Used only as the row grain.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Last calendar day of the month this snapshot row describes. Includes every month-end from the account first subscription month through 2025-06-30. Excludes months before the account existed and days that are not month-ends.
+      - name: account_id
+        type: categorical
+        description: Account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+      - name: is_paying
+        type: categorical
+        description: Whether the account had at least one active or past_due subscription at month-end. Includes past_due accounts as paying. Excludes trial-only and fully canceled accounts.
+      - name: was_paying
+        type: categorical
+        description: Whether the account was paying in the prior calendar month. Includes the lagged paying flag and is false in an account first month. Excludes nothing.
+      - name: is_new_customer
+        type: categorical
+        description: Whether this month is the account first-ever paying month. Includes first-time payers only. Excludes later months and reactivated accounts.
+      - name: is_churned
+        type: categorical
+        description: Whether the account was paying last month and is not paying this month. Includes full logo churn only. Excludes downgrades, seat reductions, and accounts that never paid.
+    measures:
+      - name: account_mrr_usd
+        description: Sum of account-level MRR in USD at month-end. Includes active and past_due subscription MRR of external, non-deleted accounts. Excludes trialing and canceled subscriptions, internal test accounts, deleted accounts, taxes, usage, and services. Ties to the subscription-grain MRR measure in total.
+        agg: sum
+        expr: mrr_usd
+      - name: paying_customers_count
+        description: Distinct external, non-deleted accounts with at least one active or past_due subscription at month-end. Includes past_due accounts. Excludes trial-only accounts, fully canceled accounts, internal test and demo accounts, and deleted accounts.
+        agg: count_distinct
+        expr: paying_account_id
+      - name: new_customers_count
+        description: Distinct accounts whose first-ever paying month is this month. Includes first-time payers only. Excludes reactivated accounts, trial starts, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: new_account_id
+      - name: churned_customers_count
+        description: Distinct accounts paying last month but not paying this month. Includes full logo churn only. Excludes partial downgrades, seat reductions, trial expirations that never converted, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: churned_account_id
+      - name: prior_paying_count
+        description: Distinct accounts that were paying in the prior calendar month, labeled on the current month row. Includes the denominator cohort for logo churn rate. Excludes accounts that never paid and internal or deleted accounts.
+        agg: count_distinct
+        expr: prior_paying_account_id
+
+metrics:
+  - name: mrr
+    description: Monthly recurring revenue in USD at month-end. Includes active and past_due seat subscriptions of external, non-deleted accounts, annual contracts divided by 12, net of subscription discounts, converted at month-end FX. Excludes trials, canceled subscriptions, internal test accounts, deleted accounts, taxes, usage, services, and one-time items. Point-in-time snapshot, always slice by month and never sum across months.
+    type: simple
+    type_params:
+      measure: mrr_usd_total
+  - name: arr
+    description: Annualized recurring revenue in USD, defined as MRR times 12. Includes everything MRR includes. Excludes everything MRR excludes. Point-in-time snapshot, always slice by month.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - mrr
+  - name: paying_customers
+    description: Count of external, non-deleted accounts with at least one active or past_due subscription at month-end. Includes past_due accounts. Excludes trial-only, fully canceled, internal test, and deleted accounts. Point-in-time snapshot, always slice by month.
+    type: simple
+    type_params:
+      measure: paying_customers_count
+  - name: new_customers
+    description: Count of accounts reaching their first-ever paying month in this month. Includes first-time payers only. Excludes reactivations, trial starts, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: new_customers_count
+  - name: churned_customers
+    description: Count of logo-churned accounts, paying last month but not paying this month. Includes full logo churn only. Excludes downgrades, seat reductions, never-converted trials, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: churned_customers_count
+  - name: prior_month_paying_customers
+    description: Count of accounts that were paying in the prior calendar month. Includes the churn-rate denominator cohort, sliced by current account attributes. Excludes never-paying, internal, and deleted accounts.
+    type: simple
+    type_params:
+      measure: prior_paying_count
+  - name: logo_churn_rate
+    description: Share of last month paying customers that churned this month, churned customers divided by prior-month paying customers. Includes full logo churn only. Excludes revenue churn, downgrades, trials, internal test accounts, and deleted accounts.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: prior_month_paying_customers
+  - name: arpa
+    description: Average revenue per paying account in USD per month, account MRR divided by paying customers. Includes active and past_due subscription MRR of external, non-deleted accounts. Excludes trials, canceled subscriptions, usage, services, taxes, internal test accounts, and deleted accounts.
+    type: ratio
+    type_params:
+      numerator: account_mrr
+      denominator: paying_customers
+  - name: account_mrr
+    description: Account-grain MRR in USD at month-end, the ARPA numerator. Includes active and past_due subscription MRR of external, non-deleted accounts. Excludes everything the MRR metric excludes. Ties to MRR in total. Point-in-time snapshot, always slice by month.
+    type: simple
+    type_params:
+      measure: account_mrr_usd

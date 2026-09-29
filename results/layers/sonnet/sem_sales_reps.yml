@@ -1,0 +1,36 @@
+version: 2
+
+semantic_models:
+  - name: sem_sales_reps
+    description: >
+      One row per sales representative. Supplies sales-org dimensions (rep name, sales
+      team, sales region) for slicing bookings and win-rate metrics via the `sales_rep`
+      entity. Carries no measures of its own -- opportunity and bookings volume come from
+      the opportunities semantic model joined through the `sales_rep` entity. Grain: one
+      row per rep_id.
+    model: ref('dim_sales_reps')
+    defaults:
+      agg_time_dimension: rep_hired_date
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_hired_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: hired_at
+        description: "The date the rep was hired. Used only for rep tenure analysis; it does not gate whether an opportunity counts toward that rep's bookings."
+      - name: rep_name
+        type: categorical
+        expr: rep_name
+        description: "The sales rep's display name. High cardinality; useful for lookups, not for aggregation."
+      - name: sales_team
+        type: categorical
+        expr: team
+        description: "The sales team the rep belongs to (e.g. 'NA Sales', 'EMEA Sales'). This is the team dimension finance and sales use to slice bookings and win rate."
+      - name: sales_rep_region
+        type: categorical
+        expr: region
+        description: "The geographic region the sales rep is assigned to. Distinct from an account's own region dimension on the accounts semantic model: a rep and the account they closed can, in principle, be in different regions."

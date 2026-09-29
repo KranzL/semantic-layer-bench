@@ -1,0 +1,57 @@
+version: 2
+
+# Helper models that feed the semantic layer. They sit between the marts and
+# the MetricFlow semantic models so that every metric applies the same cleaning
+# rules: internal (Relay Demo / QA / Sandbox / Internal) accounts are removed,
+# child accounts roll up to a customer (their parent account), amounts are
+# converted from minor units to major units and to USD, and status flags that
+# decide what counts are computed once.
+
+models:
+  - name: sem_customers
+    description: >
+      One row per customer (logo): a top-level billing account with no parent.
+      Child accounts are counted in child_account_count rather than listed.
+      Internal accounts are included here with is_internal = true so they can be
+      inspected, but no fact helper contains their activity.
+  - name: sem_subscription_months
+    description: >
+      Month-end snapshot of every subscription of a non-internal account, one row
+      per subscription per month_end from 2023-01-31 to 2025-06-30, deduplicated
+      to the newest version when subscription versions overlap. Carries MRR in
+      local currency and in USD at the month-end FX rate. Only active and
+      past_due rows have MRR; trialing and canceled rows have MRR of zero.
+  - name: sem_customer_months
+    description: >
+      One row per customer per month_end from the customer's first paying month
+      onward, with lifecycle flags (new, retained, expansion, contraction,
+      reactivated, churned) and an MRR bridge in USD measured at constant FX.
+  - name: sem_invoices
+    description: >
+      One row per invoice of a non-internal account with amounts in local major
+      units and in USD at the issue-date FX rate. is_billable marks open, paid
+      and uncollectible invoices; draft and void invoices are not billings.
+  - name: sem_revenue_recognition
+    description: >
+      One row per invoice per month of service with the net (pre-tax) amount
+      recognized in that month, in local units and USD at the invoice issue-date
+      FX rate. is_recognizable marks rows from open, paid or uncollectible
+      invoices; draft and void rows are kept for audit but are never revenue.
+  - name: sem_payments
+    description: >
+      One row per payment attempt of a non-internal account. Succeeded payments
+      are cash collected; failed attempts moved no money.
+  - name: sem_credit_notes
+    description: >
+      One row per credit note of a non-internal account. All credit notes are
+      issued after the invoice was paid, so they are cash refunds.
+  - name: sem_opportunities
+    description: >
+      One row per sales opportunity with the owning rep's team, the customer,
+      and pre-computed booking, new booking, expansion booking and open pipeline
+      amounts in USD.
+  - name: sem_usage_daily
+    description: >
+      One row per non-internal account per day per event type with the account's
+      subscription status that day and the billable quantity (api_call events on
+      days with an active or past_due subscription).

@@ -1,0 +1,372 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: >
+      One row per invoice issued to a non-internal account, all statuses (draft, open, paid, uncollectible, void)
+      and both invoice types (subscription, services). Amounts are converted from minor units (JPY has no minor
+      unit) to USD at the FX rate of the invoice issue date. Billing measures only count finalized invoices
+      (open, paid, uncollectible); draft and void invoices contribute zero.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+        description: Invoice id.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account invoiced.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account) the invoiced account rolls up to.
+    dimensions:
+      - name: issued_date
+        type: time
+        description: Date the invoice was issued (UTC).
+        type_params:
+          time_granularity: day
+      - name: due_date
+        type: time
+        description: Date payment of the invoice is due.
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the invoice issue date (fiscal year starts 1 February; FY2025 = Feb 2024 – Jan 2025).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the invoice issue date, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: invoice_type
+        type: categorical
+        description: subscription (recurring seat charges) or services (one-off professional services).
+      - name: invoice_status
+        type: categorical
+        expr: status
+        description: Current invoice status — draft, open (issued, unpaid), paid, uncollectible (written off) or void (canceled).
+      - name: is_billed
+        type: categorical
+        description: True for finalized invoices (open, paid, uncollectible) that count toward billings; false for draft and void.
+      - name: currency
+        type: categorical
+        description: Invoice currency (USD, EUR, GBP, JPY).
+    measures:
+      - name: billings_usd
+        description: >
+          Invoiced amount in USD, net of discounts and excluding tax, for finalized invoices (open, paid,
+          uncollectible) of both subscription and services types. Excludes draft and void invoices, tax, credit
+          notes/refunds and internal accounts.
+        agg: sum
+        expr: case when is_billed then net_amount_usd else 0 end
+      - name: billed_tax_usd
+        description: Sales tax/VAT in USD on finalized invoices (open, paid, uncollectible). Excludes draft and void invoices.
+        agg: sum
+        expr: case when is_billed then tax_amount_usd else 0 end
+      - name: billed_invoice_count
+        description: Number of finalized invoices (open, paid, uncollectible). Excludes draft and void invoices.
+        agg: sum
+        expr: case when is_billed then 1 else 0 end
+      - name: uncollectible_amount_usd
+        description: Invoice total in USD (including tax) of invoices written off as uncollectible (bad debt), by issue date.
+        agg: sum
+        expr: case when status = 'uncollectible' then total_amount_usd else 0 end
+
+  - name: revenue_recognition
+    description: >
+      One row per invoice per month of revenue recognition. Subscription invoices are recognized ratably by day
+      across the service period (period_start inclusive, period_end exclusive), so annual invoices are spread over
+      12 months; services invoices are recognized in full in the month issued. Amounts are net of discounts,
+      exclude tax and are converted to USD at the invoice issue-date FX rate. Excludes draft and void invoices,
+      credit notes, and internal accounts. Includes future months of already-issued invoices (scheduled revenue).
+    model: ref('sem_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_line
+        type: primary
+        expr: revenue_line_id
+        description: One invoice in one recognition month.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice being recognized.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+    dimensions:
+      - name: recognized_month
+        type: time
+        description: Calendar month (first day of month) in which the revenue is recognized.
+        type_params:
+          time_granularity: month
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the recognition month (fiscal year starts 1 February; FY2025 = Feb 2024 – Jan 2025).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the recognition month, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: revenue_type
+        type: categorical
+        expr: invoice_type
+        description: subscription (recurring, recognized ratably) or services (one-off, recognized when issued).
+      - name: currency
+        type: categorical
+        description: Original invoice currency.
+    measures:
+      - name: recognized_revenue_usd
+        description: >
+          GAAP-style recognized revenue in USD, net of discounts and excluding tax, from open, paid and
+          uncollectible invoices. Excludes draft/void invoices, credit notes/refunds and internal accounts.
+        agg: sum
+        expr: recognized_amount_usd
+
+  - name: payments
+    description: >
+      One row per payment attempt against an invoice for a non-internal account, succeeded and failed. Amounts
+      are converted to USD at the FX rate of the date the payment was received. Payments are gross of tax.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+        description: Payment id.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice the payment was applied to.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Paying billing account.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+    dimensions:
+      - name: received_date
+        type: time
+        description: Date the payment was received (UTC).
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the payment received date (fiscal year starts 1 February).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the payment received date, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: payment_status
+        type: categorical
+        expr: status
+        description: succeeded or failed. Failed attempts moved no money.
+      - name: payment_method
+        type: categorical
+        expr: method
+        description: Payment method — card, ach or wire.
+      - name: invoice_type
+        type: categorical
+        description: Type of the invoice paid (subscription or services).
+      - name: currency
+        type: categorical
+        description: Payment currency (always equal to the invoice currency).
+    measures:
+      - name: cash_collected_usd
+        description: >
+          Cash received in USD from succeeded payments, including tax, before refunds. Excludes failed payment
+          attempts and internal accounts.
+        agg: sum
+        expr: case when status = 'succeeded' then amount_usd else 0 end
+      - name: failed_payment_amount_usd
+        description: Amount in USD of failed payment attempts (no cash moved). Excludes internal accounts.
+        agg: sum
+        expr: case when status = 'failed' then amount_usd else 0 end
+
+  - name: refunds
+    description: >
+      One row per credit note for a non-internal account. Every credit note is issued against an already-paid
+      invoice and returns money to the customer, so credit notes are Relay's refunds. Amounts are converted to USD
+      at the FX rate of the credit note issue date.
+    model: ref('sem_refunds')
+    defaults:
+      agg_time_dimension: refund_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+        description: Credit note id.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice that was refunded.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Refunded billing account.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+    dimensions:
+      - name: refund_date
+        type: time
+        expr: issued_date
+        description: Date the credit note (refund) was issued.
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the refund date (fiscal year starts 1 February).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the refund date, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: refund_reason
+        type: categorical
+        expr: reason
+        description: Reason for the refund — service_credit, goodwill, downgrade_adjustment or billing_error.
+      - name: invoice_type
+        type: categorical
+        description: Type of the refunded invoice (subscription or services).
+      - name: currency
+        type: categorical
+        description: Refund currency (always equal to the invoice currency).
+    measures:
+      - name: refunds_usd
+        description: Amount refunded to customers in USD via credit notes, all reasons. Excludes internal accounts.
+        agg: sum
+        expr: amount_usd
+      - name: refund_count
+        description: Number of credit notes (refunds) issued. Excludes internal accounts.
+        agg: sum
+        expr: "1"
+
+  - name: usage_daily
+    description: >
+      One row per account per day per usage event type for non-internal accounts, Jan 2023 – Jun 2025. Event types
+      are api_call (customer API usage, billable) and health_check (automated platform pings, not billable).
+    model: ref('sem_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: usage_day_id
+        description: One account, day and event type.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account that generated the usage.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+    dimensions:
+      - name: usage_date
+        type: time
+        description: Date the usage occurred.
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        type: categorical
+        description: Relay fiscal year of the usage date (fiscal year starts 1 February).
+      - name: fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the usage date, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: event_type
+        type: categorical
+        description: api_call (billable) or health_check (not billable).
+      - name: is_billable
+        type: categorical
+        description: True only for api_call events.
+    measures:
+      - name: billable_usage_units
+        description: >
+          Number of billable usage units (API calls). Excludes health_check events and internal accounts.
+        agg: sum
+        expr: case when is_billable then quantity else 0 end
+      - name: total_usage_units
+        description: All usage units including non-billable health_check events. Excludes internal accounts.
+        agg: sum
+        expr: quantity
+
+  - name: opportunities
+    description: >
+      One row per sales opportunity on a non-internal account, all stages (open, closed_won, closed_lost) and types
+      (new business, expansion). Amounts are contract values already in USD. Time is the close date (expected close
+      date for open opportunities).
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity id.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account the opportunity is for.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level parent account).
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales rep; use sales_rep__team for the sales team.
+    dimensions:
+      - name: close_date
+        type: time
+        description: Date the opportunity closed (won or lost); expected close date if still open.
+        type_params:
+          time_granularity: day
+      - name: created_date
+        type: time
+        description: Date the opportunity was created.
+        type_params:
+          time_granularity: day
+      - name: close_fiscal_year
+        type: categorical
+        description: Relay fiscal year of the close date (fiscal year starts 1 February; FY2025 = Feb 2024 – Jan 2025).
+      - name: close_fiscal_quarter
+        type: categorical
+        description: Relay fiscal quarter of the close date, formatted FY<year>-Q<n> (Q1 = Feb–Apr).
+      - name: opportunity_type
+        type: categorical
+        description: new (new-logo business) or expansion (upsell to an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        description: Contract value in USD of closed_won opportunities (new and expansion), by close date. Excludes open and lost opportunities and internal accounts.
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+      - name: new_bookings_usd
+        description: Contract value in USD of closed_won opportunities of type new (new-logo business), by close date. Excludes expansion, open and lost opportunities.
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then amount_usd else 0 end
+      - name: expansion_bookings_usd
+        description: Contract value in USD of closed_won opportunities of type expansion, by close date. Excludes new business, open and lost opportunities.
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'expansion' then amount_usd else 0 end
+      - name: won_opportunities
+        description: Number of closed_won opportunities, by close date.
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+      - name: closed_opportunities
+        description: Number of closed opportunities (closed_won plus closed_lost), by close date. Excludes open opportunities.
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+      - name: open_pipeline_usd
+        description: Amount in USD of opportunities still open, by expected close date. Excludes closed opportunities.
+        agg: sum
+        expr: case when stage = 'open' then amount_usd else 0 end

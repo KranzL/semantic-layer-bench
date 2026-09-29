@@ -1,0 +1,163 @@
+version: 2
+
+# Sales metrics: bookings, new bookings, win rate, pipeline.
+
+semantic_models:
+  - name: opportunities
+    description: >
+      One row per CRM opportunity from fct_opportunities (4,306 opportunities, all on external
+      accounts). opportunity_type is new (first subscription for an account, or a fresh
+      subscription after a cancellation) or expansion (seat/plan increase on an existing
+      subscription). stage is closed_won, closed_lost or open. amount_usd is the annual contract
+      value (ACV) in USD: seats x contracted price x (1 - discount) x 12 for monthly plans, or the
+      annual price for annual plans; expansion amounts are the incremental ACV. close_date is the
+      actual close date for closed deals and the expected close date for open ones (open deals
+      run to 2025-10). Every opportunity has an account and a sales rep.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        description: Opportunity identifier (opportunity_id). Primary key.
+        type: primary
+        expr: opportunity_id
+      - name: account
+        description: Prospect/customer account; joins to accounts for segment, region and country.
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        description: Owning sales rep; joins to sales_reps for rep name, sales team and rep region.
+        type: foreign
+        expr: rep_id
+      - name: calendar_date
+        description: Close date; joins to fiscal_calendar.
+        type: foreign
+        expr: close_date
+    dimensions:
+      - name: close_date
+        description: Actual close date for closed_won/closed_lost, expected close date for open opportunities. Default time dimension.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: opportunity_created_date
+        description: Date the opportunity was created in the CRM.
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+      - name: opportunity_type
+        description: new (a new subscription, including re-signs after churn) or expansion (upsell on an existing subscription).
+        type: categorical
+      - name: stage
+        description: closed_won, closed_lost or open.
+        type: categorical
+    measures:
+      - name: opportunity_amount_usd
+        description: Sum of opportunity ACV in USD (unfiltered by stage).
+        agg: sum
+        expr: amount_usd
+      - name: opportunity_count
+        description: Number of opportunities (unfiltered by stage).
+        agg: count
+        expr: opportunity_id
+
+metrics:
+  - name: bookings
+    label: Bookings (ACV)
+    description: >
+      USD annual contract value of opportunities closed won in the period, by close date. Includes
+      both new and expansion deals. Excludes closed_lost and open opportunities and internal accounts
+      (none exist in the CRM). Bookings are ACV, not billings: a monthly plan is booked at 12 x MRR.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: new_bookings
+    label: New bookings (ACV)
+    description: >
+      USD ACV of closed-won opportunities of type new in the period, by close date: first
+      subscriptions and re-signs after a cancellation. Excludes expansion deals, closed_lost and
+      open opportunities, and internal accounts.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      and {{ Dimension('opportunity__opportunity_type') }} = 'new'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: expansion_bookings
+    label: Expansion bookings (ACV)
+    description: USD incremental ACV of closed-won opportunities of type expansion in the period, by close date. Excludes new deals, closed_lost, open and internal accounts.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      and {{ Dimension('opportunity__opportunity_type') }} = 'expansion'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Number of opportunities closed won in the period, by close date (new and expansion). Excludes closed_lost, open and internal accounts.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: lost_opportunities
+    label: Lost opportunities
+    description: Number of opportunities closed lost in the period, by close date. Excludes closed_won, open and internal accounts.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_lost'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Number of opportunities closed (won or lost) in the period, by close date. Excludes open opportunities and internal accounts. Denominator of win_rate.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} in ('closed_won', 'closed_lost')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Share of closed opportunities that were won: won_opportunities divided by
+      closed_opportunities (closed_won + closed_lost) by close date, counted by deal, not by
+      amount. Open opportunities are excluded from both sides. Covers new and expansion deals;
+      filter by opportunity_type for a new-logo win rate.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+
+  - name: average_deal_size
+    label: Average deal size (ACV)
+    description: bookings divided by won_opportunities, the mean USD ACV per closed-won deal in the period.
+    type: ratio
+    type_params:
+      numerator: bookings
+      denominator: won_opportunities
+
+  - name: open_pipeline
+    label: Open pipeline (ACV)
+    description: >
+      USD ACV of opportunities still in stage open, placed on their expected close date. Excludes
+      closed_won and closed_lost. This is unweighted pipeline, not a forecast.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'open'
+      and {{ Dimension('account__is_internal') }} = false

@@ -1,0 +1,62 @@
+version: 2
+
+semantic_models:
+  - name: sem_credit_notes
+    description: >
+      One row per credit note issued against an invoice, reducing the amount owed or
+      previously paid. Covers every reason a credit is issued: billing_error (correcting a
+      billing mistake), downgrade_adjustment (proration credit for a mid-cycle plan
+      downgrade), goodwill (discretionary customer-retention credit), and service_credit
+      (SLA or outage credit). Does not distinguish whether the credit was paid back in
+      cash versus applied against a future invoice balance -- both are recorded the same
+      way here. Grain: one row per credit_note_id.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: issued_date
+        description: "The calendar date the credit note was issued. Refunds are recognized on this date."
+      - name: credit_reason
+        type: categorical
+        expr: reason
+        description: "Why the credit was issued: 'billing_error', 'downgrade_adjustment', 'goodwill', or 'service_credit'. All four reasons are included in the refunds metric; filter this dimension to isolate one reason."
+      - name: credit_note_currency
+        type: categorical
+        expr: currency
+        description: "The currency the credit note was issued in. The refunds measure is already converted to USD at the issued-date fx rate; this dimension shows the original currency."
+    measures:
+      - name: refunds_amount_usd
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        agg: sum
+        description: >
+          Credit note amount in USD, converted to whole currency units and to USD at the
+          issued-date fx rate. Unfiltered by reason -- includes billing_error,
+          downgrade_adjustment, goodwill and service_credit alike.
+
+metrics:
+  - name: refunds
+    label: Refunds & Credits
+    description: >
+      Total value of credit notes issued to customers, in USD, in the period, across all
+      reasons (billing errors, downgrade proration adjustments, goodwill credits, and
+      service/SLA credits). Reduces what a customer owes or has already paid; does not by
+      itself confirm cash was actually refunded out the door versus applied against a
+      future invoice. Not netted against billings or recognized_revenue elsewhere in this
+      semantic layer -- join and subtract explicitly if you need net revenue.
+    type: simple
+    type_params:
+      measure: refunds_amount_usd

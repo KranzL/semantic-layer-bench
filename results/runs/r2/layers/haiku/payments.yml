@@ -1,0 +1,51 @@
+version: 2
+
+semantic_models:
+  - name: payments
+    description: Payments received from accounts. Includes succeeded payments only.
+    defaults:
+      agg_time_dimension: received_date
+    model: ref('fct_payments')
+    entities:
+      - name: payment
+        type: primary
+        role: identifier
+        expr: payment_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    measures:
+      - name: payment_count
+        agg: count_distinct
+        expr: payment_id
+        description: Count of distinct payments
+      - name: cash_collected_minor
+        agg: sum
+        expr: amount_minor
+        description: Cash collected in minor currency units. Sum of succeeded payment amounts.
+      - name: cash_collected_usd
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        description: Cash collected in USD
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: received_date
+        description: Date the payment was received
+      - name: status
+        type: categorical
+        expr: status
+        description: Payment status - typically succeeded for cash collection
+      - name: method
+        type: categorical
+        expr: method
+        description: Payment method - card, wire, check, etc.
+      - name: currency
+        type: categorical
+        expr: currency
+        description: Payment currency

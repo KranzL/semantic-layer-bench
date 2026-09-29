@@ -1,0 +1,184 @@
+version: 2
+
+# Billings, recognized revenue, cash and refunds. All USD figures use the FX
+# rate on the transaction date. All exclude internal Relay accounts.
+
+metrics:
+  - name: billings
+    label: Billings
+    description: >
+      Net amount invoiced in USD, dated by invoice issue date: subtotal minus
+      discount, before sales tax, for invoices in status open, paid or
+      uncollectible. Includes subscription and services invoices. Excludes draft
+      and void invoices (never owed), sales tax and internal accounts. Annual
+      plans bill a full year up front, so billings are lumpier than revenue.
+    type: simple
+    type_params:
+      measure: billings_usd
+
+  - name: billings_local_currency
+    label: Billings (local currency)
+    description: Net billings in the invoice currency (major units). Only meaningful when grouped or filtered by invoice__currency.
+    type: simple
+    type_params:
+      measure: billings_local
+
+  - name: billings_including_tax
+    label: Billings including tax
+    description: Total invoiced including sales tax, in USD, for open, paid and uncollectible invoices. The amount customers were asked to pay.
+    type: simple
+    type_params:
+      measure: billings_gross_usd
+
+  - name: invoiced_tax
+    label: Invoiced sales tax
+    description: Sales tax charged on open, paid and uncollectible invoices, in USD. A pass-through liability, not revenue.
+    type: simple
+    type_params:
+      measure: invoice_tax_usd
+
+  - name: invoice_discounts
+    label: Invoice discounts
+    description: Discounts deducted on open, paid and uncollectible invoices, in USD.
+    type: simple
+    type_params:
+      measure: invoice_discount_usd
+
+  - name: uncollectible_billings
+    label: Uncollectible billings
+    description: Net amount of invoices written off as uncollectible (bad debt), in USD, dated by issue date. These are included in billings and recognized revenue.
+    type: simple
+    type_params:
+      measure: uncollectible_usd
+
+  - name: open_receivables
+    label: Open receivables
+    description: Total including tax of invoices still open (issued, not paid, not written off), in USD, dated by issue date. Excludes draft and void.
+    type: simple
+    type_params:
+      measure: open_receivable_usd
+
+  - name: invoices_issued
+    label: Invoices issued
+    description: Number of invoices in status open, paid or uncollectible, dated by issue date. Excludes draft and void.
+    type: simple
+    type_params:
+      measure: billable_invoice_count
+
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: >
+      Revenue earned in the month, in USD: each subscription invoice's net amount
+      (subtotal minus discount, before tax) spread evenly by day over its service
+      period, plus services invoices in their issue month, for open, paid and
+      uncollectible invoices, at the invoice issue-date FX rate. Excludes draft
+      and void invoices, sales tax, un-invoiced usage and internal accounts.
+      Months after the latest invoice date show revenue already deferred from
+      annual invoices.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+
+  - name: recognized_revenue_local_currency
+    label: Recognized revenue (local currency)
+    description: Recognized revenue in the invoice currency. Only meaningful when grouped or filtered by revenue_recognition_row__currency.
+    type: simple
+    type_params:
+      measure: recognized_revenue_local
+
+  - name: cash_collected
+    label: Cash collected
+    description: >
+      Succeeded payments in USD at the FX rate on the day received. Gross of
+      refunds and inclusive of sales tax. Excludes failed payment attempts and
+      internal accounts. Subtract refunds for net cash.
+    type: simple
+    type_params:
+      measure: cash_collected_usd
+
+  - name: cash_collected_local_currency
+    label: Cash collected (local currency)
+    description: Succeeded payments in the payment currency. Only meaningful when grouped or filtered by payment__currency.
+    type: simple
+    type_params:
+      measure: cash_collected_local
+
+  - name: failed_payments
+    label: Failed payments
+    description: Number of declined payment attempts. Not cash.
+    type: simple
+    type_params:
+      measure: failed_payment_count
+
+  - name: failed_payment_amount
+    label: Failed payment amount
+    description: USD value of declined payment attempts, at the FX rate on the attempt date. Not cash.
+    type: simple
+    type_params:
+      measure: failed_payment_usd
+
+  - name: successful_payments
+    label: Successful payments
+    description: Number of succeeded payments received.
+    type: simple
+    type_params:
+      measure: successful_payment_count
+
+  - name: average_days_to_pay
+    label: Average days to pay
+    description: Average days between invoice issue and successful payment, over succeeded payments in the period.
+    type: ratio
+    type_params:
+      numerator: days_to_pay_sum
+      denominator: successful_payments
+
+  - name: days_to_pay_sum
+    label: Days to pay (sum)
+    description: Sum of days from invoice issue to successful payment; helper for average_days_to_pay.
+    type: simple
+    type_params:
+      measure: days_to_pay_total
+
+  - name: refunds
+    label: Refunds
+    description: >
+      Credit notes in USD at the credit-note-date FX rate, dated by credit note
+      date. Every credit note is issued against an already-paid invoice, so this
+      is cash returned to customers. Includes all reasons (billing_error,
+      downgrade_adjustment, goodwill, service_credit); slice by
+      credit_note__refund_reason. Excludes internal accounts. Positive number.
+    type: simple
+    type_params:
+      measure: refunds_usd
+
+  - name: refunds_local_currency
+    label: Refunds (local currency)
+    description: Credit notes in their own currency. Only meaningful when grouped or filtered by credit_note__currency.
+    type: simple
+    type_params:
+      measure: refunds_local
+
+  - name: refund_count
+    label: Refund count
+    description: Number of credit notes issued.
+    type: simple
+    type_params:
+      measure: refund_count
+
+  - name: net_cash_collected
+    label: Net cash collected
+    description: cash_collected minus refunds, in USD. Payments dated by receipt date, refunds by credit note date.
+    type: derived
+    type_params:
+      expr: cash_collected - refunds
+      metrics:
+        - name: cash_collected
+        - name: refunds
+
+  - name: refund_rate
+    label: Refund rate
+    description: refunds divided by cash_collected in the same period, as a fraction.
+    type: ratio
+    type_params:
+      numerator: refunds
+      denominator: cash_collected

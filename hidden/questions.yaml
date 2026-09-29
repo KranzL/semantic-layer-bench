@@ -1,0 +1,202 @@
+preamble: |
+  create temp view ext as select account_id, segment, region, billing_currency from marts.dim_accounts where not is_internal and not is_deleted;
+  create temp view pay_sub as
+    select m.*, e.segment, e.region, e.billing_currency, p.plan_family,
+      m.seats * m.unit_price_minor * (1 - m.discount_pct) / pow(10, m.minor_unit_exponent) / case when m.billing_interval = 'year' then 12 else 1 end * m.usd_per_unit as mrr
+    from marts.fct_subscription_months m join ext e using (account_id) join marts.dim_plans p using (plan_id)
+    where m.status in ('active', 'past_due');
+  create temp view paying as select distinct account_id, month_end from pay_sub;
+  create temp view grid as select a.account_id, d.date_day as month_end from (select distinct account_id from paying) a cross join marts.dim_date d where d.is_month_end and d.date_day between date '2023-01-31' and date '2025-06-30';
+  create temp view flags as select g.account_id, g.month_end, p.account_id is not null as is_paying,
+      coalesce(lag(p.account_id is not null) over (partition by g.account_id order by g.month_end), false) as was_paying,
+      coalesce(max(case when p.account_id is not null then 1 else 0 end) over (partition by g.account_id order by g.month_end rows between unbounded preceding and 1 preceding), 0) = 1 as ever_paid_before
+    from grid g left join paying p using (account_id, month_end);
+  create temp view bill as select i.*, e.segment, e.region, e.billing_currency, (i.subtotal_minor - i.discount_minor) / pow(10, i.minor_unit_exponent) * i.usd_per_unit as net_usd
+    from marts.fct_invoices i join ext e using (account_id) where i.status not in ('void', 'draft');
+  create temp view rev as select r.*, e.segment, r.recognized_amount_minor / pow(10, r.minor_unit_exponent) * r.usd_per_unit as rev_usd
+    from marts.fct_revenue_recognition r join ext e using (account_id) where r.status not in ('void', 'draft');
+  create temp view cash as select p.*, p.amount_minor / pow(10, p.minor_unit_exponent) * p.usd_per_unit as usd from marts.fct_payments p join ext e using (account_id) where p.status = 'succeeded';
+  create temp view refunds as select c.*, c.amount_minor / pow(10, c.minor_unit_exponent) * c.usd_per_unit as usd from marts.fct_credit_notes c join ext e using (account_id);
+  create temp view api as select u.*, e.segment from marts.fct_usage_daily u join ext e using (account_id) where u.event_type = 'api_call';
+  create temp view opps as select o.*, r.team, r.rep_name from marts.fct_opportunities o join marts.dim_sales_reps r using (rep_id);
+questions:
+  - id: q01
+    question: What was our MRR at the end of June 2025, in USD?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual, fx, minor_units]
+    sql: select sum(mrr) from pay_sub where month_end = date '2025-06-30'
+  - id: q02
+    question: What was ARR at the end of December 2024?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual, fx]
+    sql: select sum(mrr) * 12 from pay_sub where month_end = date '2024-12-31'
+  - id: q03
+    question: How many paying customers did we have at the end of March 2025?
+    kind: count
+    area: customers
+    traps: [status, internal]
+    sql: select count(*) from paying where month_end = date '2025-03-31'
+  - id: q04
+    question: What was ARPA at the end of June 2025?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual]
+    sql: select sum(mrr) / count(distinct account_id) from pay_sub where month_end = date '2025-06-30'
+  - id: q05
+    question: How many customers churned in May 2025?
+    kind: count
+    area: churn
+    traps: [status, internal]
+    sql: select count(*) from flags where month_end = date '2025-05-31' and was_paying and not is_paying
+  - id: q06
+    question: What was the logo churn rate in April 2025?
+    kind: rate
+    area: churn
+    traps: [status, internal]
+    sql: select sum(case when was_paying and not is_paying then 1 else 0 end) * 1.0 / sum(case when was_paying then 1 else 0 end) from flags where month_end = date '2025-04-30'
+  - id: q07
+    question: What were total billings in January through March 2025?
+    kind: number
+    area: billings
+    traps: [void_draft, tax, internal, fx]
+    sql: select sum(net_usd) from bill where issued_date between date '2025-01-01' and date '2025-03-31'
+  - id: q08
+    question: What were total billings in fiscal year 2025?
+    kind: number
+    area: billings
+    traps: [fiscal, void_draft, tax, internal]
+    sql: select sum(net_usd) from bill where issued_date between date '2024-02-01' and date '2025-01-31'
+  - id: q09
+    question: How much revenue did we recognize in March 2025?
+    kind: number
+    area: revenue
+    traps: [recognition, void_draft, internal]
+    sql: select sum(rev_usd) from rev where recognized_month = date '2025-03-01'
+  - id: q10
+    question: How much revenue did we recognize in Q3 of fiscal 2025?
+    kind: number
+    area: revenue
+    traps: [fiscal, recognition, void_draft]
+    sql: select sum(rev_usd) from rev where recognized_month between date '2024-08-01' and date '2024-10-01'
+  - id: q11
+    question: How much cash did we collect in June 2025?
+    kind: number
+    area: cash
+    traps: [payment_status, internal]
+    sql: select sum(usd) from cash where received_date between date '2025-06-01' and date '2025-06-30'
+  - id: q12
+    question: What was the total amount refunded to customers in 2024?
+    kind: number
+    area: refunds
+    traps: [internal, fx]
+    sql: select sum(usd) from refunds where issued_date between date '2024-01-01' and date '2024-12-31'
+  - id: q13
+    question: How many billable API calls did customers make in May 2025?
+    kind: number
+    area: usage
+    traps: [event_type, internal]
+    sql: select sum(quantity) from api where usage_date between date '2025-05-01' and date '2025-05-31'
+  - id: q14
+    question: What was MRR from EMEA customers at the end of June 2025?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual]
+    sql: select sum(mrr) from pay_sub where month_end = date '2025-06-30' and region = 'EMEA'
+  - id: q15
+    question: What was MRR from the Enterprise segment at the end of December 2024?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual]
+    sql: select sum(mrr) from pay_sub where month_end = date '2024-12-31' and segment = 'Enterprise'
+  - id: q16
+    question: How many paying customers were on an annual plan at the end of June 2025?
+    kind: count
+    area: customers
+    traps: [status, internal, annual]
+    sql: select count(distinct account_id) from pay_sub where month_end = date '2025-06-30' and billing_interval = 'year'
+  - id: q17
+    question: What were new-business bookings in Q4 of fiscal 2025?
+    kind: number
+    area: sales
+    traps: [fiscal, opp_type]
+    sql: select sum(amount_usd) from opps where stage = 'closed_won' and opportunity_type = 'new' and close_date between date '2024-11-01' and date '2025-01-31'
+  - id: q18
+    question: What were total bookings in calendar year 2024?
+    kind: number
+    area: sales
+    traps: [stage]
+    sql: select sum(amount_usd) from opps where stage = 'closed_won' and close_date between date '2024-01-01' and date '2024-12-31'
+  - id: q19
+    question: What was our win rate in the first half of 2025?
+    kind: rate
+    area: sales
+    traps: [open_opps]
+    sql: select sum(case when stage = 'closed_won' then 1 else 0 end) * 1.0 / sum(case when stage in ('closed_won', 'closed_lost') then 1 else 0 end) from opps where close_date between date '2025-01-01' and date '2025-06-30'
+  - id: q20
+    question: What was the EMEA Sales team's win rate in 2024?
+    kind: rate
+    area: sales
+    traps: [open_opps, rep_team]
+    sql: select sum(case when stage = 'closed_won' then 1 else 0 end) * 1.0 / sum(case when stage in ('closed_won', 'closed_lost') then 1 else 0 end) from opps where team = 'EMEA Sales' and close_date between date '2024-01-01' and date '2024-12-31'
+  - id: q21
+    question: How much did MRR grow between the end of June 2024 and the end of June 2025?
+    kind: number
+    area: mrr
+    traps: [status, internal, annual]
+    sql: select sum(case when month_end = date '2025-06-30' then mrr else 0 end) - sum(case when month_end = date '2024-06-30' then mrr else 0 end) from pay_sub
+  - id: q22
+    question: What were 2024 billings from customers billed in Japanese yen, in USD?
+    kind: number
+    area: billings
+    traps: [minor_units, fx, void_draft, tax]
+    sql: select sum(net_usd) from bill where billing_currency = 'JPY' and issued_date between date '2024-01-01' and date '2024-12-31'
+  - id: q23
+    question: What share of June 2025 billings came from services invoices?
+    kind: rate
+    area: billings
+    traps: [void_draft, tax]
+    sql: select sum(case when invoice_type = 'services' then net_usd else 0 end) / sum(net_usd) from bill where issued_date between date '2025-06-01' and date '2025-06-30'
+  - id: q24
+    question: What was net cash, meaning cash collected minus refunds, in April through June 2025?
+    kind: number
+    area: cash
+    traps: [payment_status, internal]
+    sql: select (select sum(usd) from cash where received_date between date '2025-04-01' and date '2025-06-30') - (select sum(usd) from refunds where issued_date between date '2025-04-01' and date '2025-06-30')
+  - id: q25
+    question: How many paying customers were on a Growth plan at the end of December 2024?
+    kind: count
+    area: customers
+    traps: [status, internal, plan_version]
+    sql: select count(distinct account_id) from pay_sub where month_end = date '2024-12-31' and plan_family = 'Growth'
+  - id: q26
+    question: How many billable API calls did Enterprise-segment customers make in January through March 2025?
+    kind: number
+    area: usage
+    traps: [event_type, internal]
+    sql: select sum(quantity) from api where segment = 'Enterprise' and usage_date between date '2025-01-01' and date '2025-03-31'
+  - id: q27
+    question: What was ARR from customers billed in British pounds at the end of June 2025, in USD?
+    kind: number
+    area: mrr
+    traps: [status, annual, fx]
+    sql: select sum(mrr) * 12 from pay_sub where month_end = date '2025-06-30' and billing_currency = 'GBP'
+  - id: q28
+    question: How many new customers did we add in April through June 2025?
+    kind: count
+    area: customers
+    traps: [status, internal, new_definition]
+    sql: select count(*) from flags where month_end between date '2025-04-30' and date '2025-06-30' and is_paying and not ever_paid_before
+  - id: q29
+    question: How many customers churned in calendar year 2024 in total?
+    kind: count
+    area: churn
+    traps: [status, internal]
+    sql: select count(*) from flags where month_end between date '2024-01-31' and date '2024-12-31' and was_paying and not is_paying
+  - id: q30
+    question: Which sales rep had the highest bookings in fiscal year 2025?
+    kind: text
+    area: sales
+    traps: [fiscal, stage]
+    sql: select rep_name from opps where stage = 'closed_won' and close_date between date '2024-02-01' and date '2025-01-31' group by rep_id, rep_name order by sum(amount_usd) desc limit 1

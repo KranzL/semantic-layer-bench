@@ -1,0 +1,18 @@
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: accounts
+      - name: plans
+      - name: subscriptions
+      - name: subscription_versions
+      - name: invoices
+      - name: payments
+      - name: credit_notes
+      - name: fx_rates
+      - name: currencies
+      - name: usage_events
+      - name: sales_reps
+      - name: opportunities
+      - name: fiscal_calendar

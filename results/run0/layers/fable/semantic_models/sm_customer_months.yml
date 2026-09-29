@@ -1,0 +1,113 @@
+version: 2
+
+semantic_models:
+  - name: customer_months
+    label: Customer lifecycle by month
+    description: >
+      One row per customer (top-level account) per month end, from the month the
+      customer first had MRR through 2025-06-30, including months after the
+      customer stopped paying. Built from the subscription snapshot, so internal
+      accounts are excluded and child accounts are rolled into their parent.
+      Each row is classified as new, expansion, contraction, flat, reactivated,
+      churned or inactive by comparing MRR with the previous month end, with the
+      previous month revalued at the current month's FX rate so that currency
+      moves are reported separately as FX impact rather than as growth or churn.
+      These measures are flows: they add up correctly over quarters and years.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+        description: Surrogate key customer_id | month_end.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (top-level account).
+      - name: calendar_date
+        type: foreign
+        expr: month_end
+        description: Month-end date, for fiscal calendar attributes.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Month-end date of the row (last day of the month); the reporting month at month granularity.
+      - name: customer_status
+        type: categorical
+        description: >
+          Lifecycle state this month: new (first month with MRR), reactivated
+          (MRR again after a gap), expansion (paid both months, MRR up at constant
+          FX), contraction (paid both months, MRR down at constant FX), flat (paid
+          both months, unchanged), churned (paid last month, no MRR this month) or
+          inactive (no MRR this month or last).
+      - name: is_paying
+        type: categorical
+        description: True when the customer has MRR greater than zero this month.
+    measures:
+      - name: new_customer_count
+        label: New customers
+        agg: sum
+        expr: case when is_new then 1 else 0 end
+        description: >
+          Customers whose first-ever month with MRR is this month. A customer is
+          new once; a customer returning after a gap is a reactivation, not new.
+          Trials that never convert are not counted.
+      - name: churned_customer_count
+        label: Churned customers
+        agg: sum
+        expr: case when is_churned then 1 else 0 end
+        description: >
+          Customers who had MRR at the previous month end and none at this month
+          end (all their subscriptions canceled). Counted in the first month
+          without MRR. Downgrades are not churn; trials that never paid are not churn.
+      - name: reactivated_customer_count
+        label: Reactivated customers
+        agg: sum
+        expr: case when is_reactivated then 1 else 0 end
+        description: Customers who regained MRR this month after one or more months with none, excluding their first-ever paying month.
+      - name: retained_customer_count
+        label: Retained customers
+        agg: sum
+        expr: case when is_retained then 1 else 0 end
+        description: Customers with MRR both this month and the previous month.
+      - name: new_mrr_usd
+        label: New MRR
+        agg: sum
+        expr: new_mrr_usd
+        description: USD MRR of customers in their first paying month.
+      - name: expansion_mrr_usd
+        label: Expansion MRR
+        agg: sum
+        expr: expansion_mrr_usd
+        description: >
+          Increase in USD MRR from retained customers whose MRR rose (more seats,
+          higher plan, smaller discount), measured at this month's FX rate so
+          currency moves are excluded.
+      - name: contraction_mrr_usd
+        label: Contraction MRR
+        agg: sum
+        expr: contraction_mrr_usd
+        description: >
+          Decrease in USD MRR from retained customers whose MRR fell (fewer seats,
+          lower plan, bigger discount), at constant FX. Reported as a positive number.
+      - name: churned_mrr_usd
+        label: Churned MRR
+        agg: sum
+        expr: churned_mrr_usd
+        description: Previous-month USD MRR (at this month's FX rate) of customers who churned this month. Positive number.
+      - name: reactivation_mrr_usd
+        label: Reactivation MRR
+        agg: sum
+        expr: reactivation_mrr_usd
+        description: USD MRR of customers reactivated this month.
+      - name: fx_impact_mrr_usd
+        label: FX impact on MRR
+        agg: sum
+        expr: fx_impact_mrr_usd
+        description: >
+          Change in the previous month's MRR caused only by revaluing it at this
+          month's FX rate. new + expansion + reactivation - contraction - churned
+          + fx impact equals the month-over-month change in MRR exactly.

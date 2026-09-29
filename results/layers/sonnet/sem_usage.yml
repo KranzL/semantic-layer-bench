@@ -1,0 +1,55 @@
+version: 2
+
+semantic_models:
+  - name: sem_usage
+    description: >
+      One row per account per calendar day per usage event type, with the total quantity
+      of that event type recorded that day. Covers two event types: 'api_call' (actual,
+      variable-volume customer API traffic that is metered and billable) and
+      'health_check' (a fixed-cadence automated heartbeat/monitoring ping, constant at 288
+      per account per day, that is never customer-billable). Grain: one row per
+      (account_id, usage_date, event_type).
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: "account_id || '-' || cast(usage_date as varchar) || '-' || event_type"
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: usage_date
+        description: "The calendar date the usage occurred."
+      - name: usage_event_type
+        type: categorical
+        expr: event_type
+        description: "'api_call' for metered, billable customer API usage, or 'health_check' for a fixed, automated, non-billable monitoring heartbeat. The billable_usage metric includes only 'api_call'."
+    measures:
+      - name: usage_quantity
+        expr: quantity
+        agg: sum
+        description: >
+          Raw, unfiltered total usage quantity (units vary implicitly by event_type -- API
+          calls for 'api_call', fixed heartbeat pings for 'health_check'). Includes
+          non-billable health_check volume; the billable_usage metric filters this to
+          'api_call' only.
+
+metrics:
+  - name: billable_usage
+    label: Billable Usage
+    description: >
+      Total metered customer usage (API call volume) in the period, summed across
+      accounts. Excludes health_check events entirely -- those are a fixed, automated
+      monitoring heartbeat (constant 288/account/day), not customer-driven and never
+      billable. Reported in raw usage units (API calls), not currency.
+    type: simple
+    type_params:
+      measure: usage_quantity
+    filter: |
+      {{ Dimension('usage_day__usage_event_type') }} = 'api_call'

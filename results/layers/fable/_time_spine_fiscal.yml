@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: sl_fiscal_months
+    description: >
+      Month-grain time spine that carries Relay's fiscal calendar. Relay's fiscal year starts on
+      1 February, so FY2025 runs from 2024-02-01 to 2025-01-31 and fiscal Q1 is Feb-Apr. It exposes
+      fiscal_year, fiscal_quarter and fiscal_month as custom MetricFlow granularities, so any metric
+      can be grouped by metric_time__fiscal_year, metric_time__fiscal_quarter or
+      metric_time__fiscal_month. The day-grain spine (metricflow_time_spine) still handles
+      standard day/week/month/quarter/year granularities.
+    time_spine:
+      standard_granularity_column: date_month
+      custom_granularities:
+        - name: fiscal_year
+          column_name: fiscal_year
+        - name: fiscal_quarter
+          column_name: fiscal_quarter
+        - name: fiscal_month
+          column_name: fiscal_month
+    columns:
+      - name: date_month
+        description: First day of the calendar month.
+        granularity: month
+      - name: fiscal_year
+        description: Fiscal year label, e.g. FY2025 (1 Feb 2024 to 31 Jan 2025).
+      - name: fiscal_quarter
+        description: Fiscal quarter label, e.g. FY2025-Q1 (Feb-Apr 2024).
+      - name: fiscal_month
+        description: Fiscal month label, e.g. FY2025-M01 (Feb 2024).

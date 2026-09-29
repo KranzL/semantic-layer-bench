@@ -1,0 +1,64 @@
+version: 2
+
+semantic_models:
+  - name: usage_daily
+    description: One row per account per day per usage event type. Includes billable api_call events and non-billable health_check monitoring events for external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts. The billable_quantity column holds event counts for api_call rows and is zero for health_check rows.
+    model: ref('sem_usage')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_row
+        type: primary
+        expr: row_key
+        description: Unique key for one account, day, and event type. Includes the account id, usage date, and event type. Used only as the row grain.
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the usage events occurred. Includes every date from 2023-01-03 through 2025-06-30. Excludes nothing.
+      - name: event_type
+        type: categorical
+        description: Usage event type (api_call or health_check). Includes both types. Billable usage counts api_call only and excludes health_check, which is a fixed internal monitoring heartbeat of 288 events per day.
+      - name: account_id
+        type: categorical
+        description: Using account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Using account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+    measures:
+      - name: billable_usage_total
+        description: Sum of billable usage events. Includes api_call events of external, non-deleted accounts. Excludes health_check monitoring events, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: billable_quantity
+      - name: total_usage_total
+        description: Sum of all usage events. Includes api_call and health_check events of external, non-deleted accounts. Excludes internal test accounts and deleted accounts.
+        agg: sum
+        expr: quantity
+
+metrics:
+  - name: billable_usage
+    description: Count of billable usage events. Includes api_call events of external, non-deleted accounts. Excludes health_check monitoring events, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: billable_usage_total
+  - name: total_usage
+    description: Count of all usage events including monitoring. Includes api_call and health_check events of external, non-deleted accounts. Excludes internal test accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: total_usage_total

@@ -1,0 +1,283 @@
+version: 2
+
+# Customer flow metrics: new / churned / reactivated customers, logo churn rate, MRR movements.
+
+models:
+  - name: customer_months
+    description: >
+      Helper model for customer-flow metrics. One row per external account per month end
+      (2023-01-31 to 2025-06-30) for months in which the account was paying at this month end or
+      at the previous month end. "Paying" means a subscription version with status active or
+      past_due was in force on the month-end date. Internal accounts are excluded in SQL. Flags
+      mark new, reactivated, retained and churned customers and the MRR movement versus the prior
+      month end. Snapshots are month-end only, so a customer who churns and returns within one
+      month is not seen.
+    columns:
+      - name: customer_month_id
+        description: Surrogate key account_id|month_end.
+      - name: account_id
+        description: Billing account.
+      - name: month_end
+        description: Month-end snapshot date.
+      - name: is_paying
+        description: Account had an active or past_due subscription at this month end.
+      - name: was_paying_prior_month
+        description: Account had an active or past_due subscription at the previous month end.
+      - name: is_new_customer
+        description: This month end is the first month end at which the account was ever paying.
+      - name: is_reactivated_customer
+        description: Paying this month end, not paying at the previous month end, and had paid at some earlier month end.
+      - name: is_churned_customer
+        description: Paying at the previous month end but not at this month end (logo churn).
+      - name: is_retained_customer
+        description: Paying at both this and the previous month end.
+      - name: customer_movement
+        description: new, reactivated, churned, expansion, contraction or retained_flat.
+      - name: mrr_usd
+        description: MRR in USD at this month end (0 when not paying).
+      - name: prior_month_mrr_usd
+        description: MRR in USD at the previous month end (0 when not paying then).
+
+semantic_models:
+  - name: customer_months
+    description: >
+      Account x month-end grid built from the subscription snapshots (customer_months helper
+      model). Rows exist only for external accounts and only for months in which the account was
+      a paying customer (active or past_due subscription) at this or the previous month end. Used
+      for flows between month ends: new customers, logo churn, reactivations and MRR movements
+      (new, expansion, contraction, churned, reactivation). Plan, billing interval and currency
+      on a churned row are those of the subscription the customer churned from. Internal accounts
+      are already excluded; trialing-only accounts never appear.
+    model: ref('customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        description: Surrogate key account_id|month_end. Primary key.
+        type: primary
+        expr: customer_month_id
+      - name: account
+        description: Billing account; joins to accounts for segment, region, country and currency.
+        type: foreign
+        expr: account_id
+      - name: subscription
+        description: The paying subscription at this month end, or the subscription churned from.
+        type: foreign
+        expr: subscription_id
+      - name: plan
+        description: Plan of the paying subscription at this month end, or the plan churned from; joins to plans.
+        type: foreign
+        expr: plan_id
+      - name: calendar_date
+        description: The month-end snapshot date; joins to fiscal_calendar.
+        type: foreign
+        expr: month_end
+    dimensions:
+      - name: month_end
+        description: Month-end snapshot date (last calendar day of the month).
+        type: time
+        type_params:
+          time_granularity: day
+      - name: customer_movement
+        description: >
+          Movement versus the previous month end: new (first paying month), reactivated (returned
+          after churning), churned (paying last month, not this month), expansion (retained, MRR
+          up), contraction (retained, MRR down) or retained_flat (retained, MRR unchanged).
+        type: categorical
+      - name: is_paying
+        description: True when the account is a paying customer at this month end.
+        type: categorical
+      - name: was_paying_prior_month
+        description: True when the account was a paying customer at the previous month end.
+        type: categorical
+      - name: billing_interval
+        description: Billing interval (month or year) of the paying subscription, or of the subscription churned from.
+        type: categorical
+      - name: currency
+        description: Contract currency (USD, EUR, GBP, JPY) of the paying subscription, or of the subscription churned from.
+        type: categorical
+      - name: first_paying_month_end
+        description: The first month end at which the account was a paying customer (its acquisition month).
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: new_customer_count
+        description: Count of accounts whose first-ever paying month end is this month end.
+        agg: sum
+        expr: case when is_new_customer then 1 else 0 end
+      - name: churned_customer_count
+        description: Count of accounts paying at the previous month end but not at this month end.
+        agg: sum
+        expr: case when is_churned_customer then 1 else 0 end
+      - name: reactivated_customer_count
+        description: Count of accounts paying at this month end that were not paying at the previous month end but had paid earlier.
+        agg: sum
+        expr: case when is_reactivated_customer then 1 else 0 end
+      - name: retained_customer_count
+        description: Count of accounts paying at both this and the previous month end.
+        agg: sum
+        expr: case when is_retained_customer then 1 else 0 end
+      - name: start_of_month_customer_count
+        description: Count of accounts paying at the previous month end, i.e. the customer base at the start of the month that is exposed to churn.
+        agg: sum
+        expr: case when was_paying_prior_month then 1 else 0 end
+      - name: start_of_month_mrr_usd
+        description: Sum of prior-month-end MRR in USD over accounts paying at the previous month end, i.e. MRR at the start of the month.
+        agg: sum
+        expr: case when was_paying_prior_month then prior_month_mrr_usd else 0 end
+      - name: new_mrr_usd
+        description: MRR in USD at this month end from accounts in their first paying month.
+        agg: sum
+        expr: new_mrr_usd
+      - name: reactivation_mrr_usd
+        description: MRR in USD at this month end from accounts that returned after having churned.
+        agg: sum
+        expr: reactivation_mrr_usd
+      - name: expansion_mrr_usd
+        description: Increase in MRR (USD) versus the previous month end for retained accounts whose MRR rose (more seats, higher plan, less discount or FX).
+        agg: sum
+        expr: expansion_mrr_usd
+      - name: contraction_mrr_usd
+        description: Decrease in MRR (USD, positive number) versus the previous month end for retained accounts whose MRR fell.
+        agg: sum
+        expr: contraction_mrr_usd
+      - name: churned_mrr_usd
+        description: Prior-month-end MRR in USD (positive number) of accounts that churned at this month end.
+        agg: sum
+        expr: churned_mrr_usd
+
+metrics:
+  - name: new_customers
+    label: New customers
+    description: >
+      Number of external billing accounts that became paying customers for the first time in the
+      period, measured at month ends: the account has an active or past_due subscription at this
+      month end and never had one at any earlier month end. Excludes trial sign-ups that have not
+      converted, reactivations of previously churned accounts, and internal accounts. The first
+      data month (2023-01) counts every paying account as new.
+    type: simple
+    type_params:
+      measure: new_customer_count
+
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Logo churn: number of external billing accounts that were paying (active or past_due
+      subscription) at the previous month end and are not paying at this month end, because the
+      subscription was canceled or the account was deleted. Excludes trials that ended without
+      converting, internal accounts, and downgrades (which stay customers). An account can churn
+      more than once if it later reactivates and churns again.
+    type: simple
+    type_params:
+      measure: churned_customer_count
+
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: >
+      Number of external accounts paying at this month end that were not paying at the previous
+      month end but had been a paying customer at some earlier month end (a new subscription after
+      a cancellation). Not counted in new_customers.
+    type: simple
+    type_params:
+      measure: reactivated_customer_count
+
+  - name: customers_start_of_month
+    label: Customers at start of month
+    description: >
+      Number of external accounts that were paying customers at the previous month end, i.e. the
+      customer base exposed to churn during the month. Equals paying_customers of the prior month.
+      Used as the denominator of logo_churn_rate.
+    type: simple
+    type_params:
+      measure: start_of_month_customer_count
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Monthly customer churn rate: churned_customers divided by customers_start_of_month, i.e.
+      accounts lost during the month as a share of the paying accounts at the previous month end.
+      Only external accounts with an active or past_due subscription are in either side; trials
+      and internal accounts are excluded. Summing over longer periods gives churned accounts over
+      the sum of monthly starting bases, not a compounded rate.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: customers_start_of_month
+
+  - name: new_mrr
+    label: New MRR
+    description: MRR in USD at this month end contributed by new_customers (first paying month). Excludes reactivations and expansion.
+    type: simple
+    type_params:
+      measure: new_mrr_usd
+
+  - name: expansion_mrr
+    label: Expansion MRR
+    description: >
+      Increase in USD MRR versus the previous month end from retained accounts whose MRR grew
+      (added seats, upgraded plan, reduced discount, or a favourable FX move for non-USD
+      contracts). Excludes new and reactivated accounts.
+    type: simple
+    type_params:
+      measure: expansion_mrr_usd
+
+  - name: contraction_mrr
+    label: Contraction MRR
+    description: >
+      Decrease in USD MRR (reported as a positive number) versus the previous month end from
+      retained accounts whose MRR shrank (fewer seats, downgraded plan, larger discount, or an
+      adverse FX move). Excludes churned accounts, whose full MRR is in churned_mrr.
+    type: simple
+    type_params:
+      measure: contraction_mrr_usd
+
+  - name: churned_mrr
+    label: Churned MRR
+    description: Prior-month-end USD MRR (positive number) of external accounts that stopped paying at this month end (logo churn). Excludes contraction.
+    type: simple
+    type_params:
+      measure: churned_mrr_usd
+
+  - name: reactivation_mrr
+    label: Reactivation MRR
+    description: USD MRR at this month end from reactivated_customers (returned after churning). Not included in new_mrr.
+    type: simple
+    type_params:
+      measure: reactivation_mrr_usd
+
+  - name: net_new_mrr
+    label: Net new MRR
+    description: >
+      Change in USD MRR versus the previous month end: new_mrr + expansion_mrr + reactivation_mrr
+      - contraction_mrr - churned_mrr. Reconciles to the month-over-month change in the mrr metric.
+    type: derived
+    type_params:
+      expr: new_mrr + expansion_mrr + reactivation_mrr - contraction_mrr - churned_mrr
+      metrics:
+        - name: new_mrr
+        - name: expansion_mrr
+        - name: reactivation_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+
+  - name: mrr_start_of_month
+    label: MRR at start of month
+    description: USD MRR at the previous month end of the accounts that were paying then. Equals prior-month mrr. Denominator for gross_mrr_churn_rate.
+    type: simple
+    type_params:
+      measure: start_of_month_mrr_usd
+
+  - name: gross_mrr_churn_rate
+    label: Gross MRR churn rate
+    description: >
+      Monthly gross revenue churn: (churned_mrr + contraction_mrr) divided by mrr_start_of_month.
+      Lost and reduced MRR as a share of the MRR at the previous month end; expansion and new MRR
+      are not netted against it.
+    type: derived
+    type_params:
+      expr: (churned_mrr + contraction_mrr) / nullif(mrr_start_of_month, 0)
+      metrics:
+        - name: churned_mrr
+        - name: contraction_mrr
+        - name: mrr_start_of_month

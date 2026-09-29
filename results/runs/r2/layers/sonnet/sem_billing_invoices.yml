@@ -1,0 +1,74 @@
+version: 2
+
+semantic_models:
+  - name: sem_billing_invoices
+    description: >
+      One row per invoice (int_billing_invoices, built from fct_invoices), covering both
+      recurring subscription invoices and one-time professional-services invoices.
+      Internal/test accounts are already excluded in int_billing_invoices. Use this model
+      for "billings" (amount invoiced); use sem_revenue_recognition for accrual-basis
+      recognized revenue and sem_payments for cash actually collected.
+    model: ref('int_billing_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: plan_id
+        type: foreign
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar date the invoice was issued to the customer.
+      - name: invoice_type
+        type: categorical
+        description: >
+          "subscription" for recurring seat-based invoices tied to a subscription, or
+          "services" for one-time professional-services invoices (no subscription_id).
+      - name: status
+        type: categorical
+        description: >
+          Invoice lifecycle status: "draft" (not yet finalized/sent), "open" (sent,
+          awaiting payment), "paid" (fully paid), "uncollectible" (finalized and sent but
+          written off as bad debt), or "void" (canceled, customer was never actually
+          charged).
+      - name: plan_family
+        type: categorical
+        description: >
+          Plan family (Starter, Growth, Scale, Enterprise) billed on the invoice, resolved
+          from the subscription version effective at the invoice's period_start. Null for
+          "services" invoices, which are not tied to a subscription.
+      - name: billing_interval
+        type: categorical
+        description: >
+          Billing cadence ("month" or "year") of the plan billed on the invoice. Null for
+          "services" invoices.
+    measures:
+      - name: billed_amount
+        description: >
+          Net amount invoiced to customers, in USD: subtotal minus discount, excluding tax
+          (tax is collected on behalf of tax authorities, not company revenue). Includes
+          both subscription and services invoices. Only includes invoices that were
+          actually finalized and sent to the customer (status "open", "paid" or
+          "uncollectible"); excludes "draft" invoices (not yet sent) and "void" invoices
+          (canceled, customer never charged). Excludes Relay's internal/test accounts.
+        agg: sum
+        expr: case when status not in ('draft', 'void') then billed_amount_usd end
+
+metrics:
+  - name: billings
+    description: >
+      Billings: total amount invoiced to customers (subtotal net of discount, excluding
+      tax) in USD, across both subscription and one-time services invoices. Excludes
+      draft and void invoices and Relay's internal/test accounts. Not the same as cash
+      collected (see cash_collected, based on actual payments) or recognized_revenue
+      (accrual-basis revenue spread over the service period). Slice by issued_date
+      (metric_time), invoice_type, status, plan_family/billing_interval, and via joined
+      account dimensions by segment, region and billing_currency.
+    type: simple
+    type_params:
+      measure: billed_amount

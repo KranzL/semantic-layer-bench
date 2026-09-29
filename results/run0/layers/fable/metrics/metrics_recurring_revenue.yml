@@ -1,0 +1,105 @@
+version: 2
+
+# Recurring revenue and customer-count metrics. All are month-end balances
+# taken from the subscription snapshot: at quarter or year granularity they
+# return the last month end of the period, not a sum.
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD at month end. Sum over active and past_due
+      subscriptions of external accounts of seats x per-seat price x (1 - discount),
+      with annual plan prices divided by 12, converted at the month-end FX rate.
+      Excludes free trials, canceled subscriptions, internal accounts, sales tax,
+      usage charges and one-off services. Slice by customer__segment,
+      customer__region, subscription_month__currency, plan__plan_family or
+      subscription_month__billing_interval.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: mrr_local_currency
+    label: MRR (local currency)
+    description: >
+      MRR in each subscription's own currency (major units, e.g. euros or yen),
+      same inclusion rules as mrr. Only meaningful when grouped or filtered by
+      subscription_month__currency; a total across currencies mixes units.
+    type: simple
+    type_params:
+      measure: mrr_local
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD: MRR x 12 at month end. Same inclusions and
+      exclusions as mrr (paying subscriptions only, no trials, no internal
+      accounts, no tax, usage or services).
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of distinct customers (logos) with at least one active or past_due
+      subscription at month end. Child accounts are rolled into their parent, so a
+      parent with paying children counts once. Excludes customers with only
+      trialing or canceled subscriptions and internal accounts.
+    type: simple
+    type_params:
+      measure: paying_customer_count
+
+  - name: paying_accounts
+    label: Paying accounts
+    description: >
+      Number of distinct billing accounts with an active or past_due subscription
+      at month end, counting parent and child accounts separately. Use
+      paying_customers for a logo count. Excludes trials, canceled subscriptions
+      and internal accounts.
+    type: simple
+    type_params:
+      measure: paying_account_count
+
+  - name: paying_subscriptions
+    label: Paying subscriptions
+    description: Number of distinct active or past_due subscriptions at month end. Excludes trials, canceled and internal accounts.
+    type: simple
+    type_params:
+      measure: paying_subscription_count
+
+  - name: trialing_subscriptions
+    label: Trialing subscriptions
+    description: Number of distinct subscriptions in a free trial at month end (no MRR). Excludes internal accounts.
+    type: simple
+    type_params:
+      measure: trialing_subscription_count
+
+  - name: paying_seats
+    label: Paying seats
+    description: Contracted seats on active and past_due subscriptions at month end. Excludes trial and canceled seats and internal accounts.
+    type: simple
+    type_params:
+      measure: paying_seats_total
+
+  - name: arpa
+    label: ARPA (average MRR per paying customer)
+    description: >
+      Average revenue per account: MRR divided by paying customers at month end,
+      in USD per customer per month. Customers are logos (child accounts rolled
+      into their parent). Excludes trials, canceled subscriptions and internal
+      accounts. Multiply by 12 for annualised ARPA.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+
+  - name: average_mrr_per_seat
+    label: Average MRR per seat
+    description: MRR divided by paying seats at month end, in USD per seat per month, after discounts. Same inclusions as mrr.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_seats

@@ -1,0 +1,98 @@
+semantic_models:
+  - name: sem_opportunities
+    description: >
+      One row per sales opportunity. Grouped by its close_date (the actual
+      close date for closed_won/closed_lost deals, or the target/expected
+      close date while still open). amount_usd is the deal's total contract
+      value in USD as tracked by the sales team, independent of the
+      billing-system currency conversions used elsewhere in this project.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: rep_id
+        type: foreign
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The actual close date for closed_won/closed_lost opportunities, or the target close date while the opportunity is still open.
+      - name: opportunity_type
+        type: categorical
+        description: "new (net-new logo, from a prospect with no prior paid subscription) or expansion (upsell/cross-sell to an existing customer)."
+      - name: stage
+        type: categorical
+        description: "open (still in the pipeline, not yet decided), closed_won (deal signed) or closed_lost (deal lost/abandoned)."
+    measures:
+      - name: opportunity_amount_usd
+        agg: sum
+        expr: amount_usd
+        description: >
+          Deal amount in USD for every opportunity regardless of stage
+          (including still-open pipeline and lost deals). Always used
+          together with a stage filter (via the bookings/new_bookings
+          metrics) -- summing this measure directly would count
+          undecided pipeline and lost deals as bookings.
+      - name: opportunity_count
+        agg: count
+        expr: opportunity_id
+        description: >
+          Count of opportunities regardless of stage. Always used together
+          with a stage filter (via the closed_won_opportunities and
+          closed_lost_opportunities metrics that feed win_rate).
+
+metrics:
+  - name: bookings
+    description: >
+      Total contract value of won deals, in USD, in the period they
+      closed -- both new-logo and expansion opportunities. Excludes
+      still-open pipeline and lost deals.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity_id__stage') }} = 'closed_won'
+  - name: new_bookings
+    description: >
+      Total contract value of won deals from net-new logos only
+      (opportunity_type = new), in USD, in the period they closed.
+      Excludes expansion/upsell deals with existing customers,
+      still-open pipeline and lost deals.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity_id__stage') }} = 'closed_won'
+      and {{ Dimension('opportunity_id__opportunity_type') }} = 'new'
+  - name: closed_won_opportunities
+    description: Count of opportunities that closed won in the period. Used as an input to win_rate.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity_id__stage') }} = 'closed_won'
+  - name: closed_lost_opportunities
+    description: Count of opportunities that closed lost in the period. Used as an input to win_rate.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity_id__stage') }} = 'closed_lost'
+  - name: win_rate
+    description: >
+      Share of decided opportunities that were won: closed_won divided
+      by (closed_won + closed_lost), for opportunities closed in the
+      period. Excludes still-open pipeline from both the numerator and
+      denominator, so it measures win rate among deals sales has
+      actually decided, not against the full pipeline.
+    type: derived
+    type_params:
+      expr: closed_won_opportunities / nullif(closed_won_opportunities + closed_lost_opportunities, 0)
+      metrics:
+        - name: closed_won_opportunities
+        - name: closed_lost_opportunities

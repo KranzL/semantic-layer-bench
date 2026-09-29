@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: sem_fiscal_time_spine
+    description: >
+      Daily fiscal calendar lookup (fiscal year starts 1 February), joined onto semantic fact models to provide
+      fiscal_year and fiscal_quarter (FY<year>-Q<n>) dimensions. Not a MetricFlow time spine.
+  - name: sem_accounts
+    description: Non-internal billing accounts with the customer (top-level parent) they roll up to.
+  - name: sem_customers
+    description: Customers (logos) — non-internal top-level accounts with no parent.
+  - name: sem_subscription_months
+    description: Month-end snapshot of paying (active/past_due) subscriptions with MRR, deduplicated for overlapping versions; internal accounts excluded.
+  - name: sem_customer_months
+    description: Customer x month grid with paying, new, reactivated and churned flags; internal accounts excluded.
+  - name: sem_invoices
+    description: Invoices for non-internal accounts with USD amounts and a flag for finalized (billed) invoices.
+  - name: sem_revenue_recognition
+    description: Monthly recognized revenue per invoice in USD, excluding draft/void invoices and internal accounts.
+  - name: sem_payments
+    description: Payment attempts for non-internal accounts with USD amounts.
+  - name: sem_refunds
+    description: Credit notes (refunds) for non-internal accounts with USD amounts.
+  - name: sem_usage_daily
+    description: Daily usage per account and event type with a billable flag; internal accounts excluded.
+  - name: sem_opportunities
+    description: Sales opportunities on non-internal accounts.

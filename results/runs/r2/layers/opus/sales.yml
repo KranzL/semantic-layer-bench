@@ -1,0 +1,166 @@
+version: 2
+
+models:
+  - name: sem_opportunities
+    description: Sales opportunities of external, non-deleted accounts, one row per opportunity.
+
+semantic_models:
+  - name: opportunities
+    description: >
+      Sales opportunities from the CRM, one row per opportunity, dated by close date (the expected
+      close date for open opportunities). Includes new-business and expansion opportunities in
+      every stage (open, closed_won, closed_lost). amount_usd is the annualized contract value
+      (first-year ACV) in USD. Excludes internal and deleted accounts, which have no opportunities
+      in the data.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: An opportunity (OPP-...).
+      - name: account
+        type: foreign
+        expr: account_id
+        description: The prospect or customer account the opportunity is with.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (top-level parent account) the opportunity rolls up to.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: The sales rep who owns the opportunity. Use sales_rep__team / sales_rep__region for sales team slicing.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity closed (won or lost), or its expected close date if still open.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created.
+      - name: opportunity_type
+        type: categorical
+        description: new (new-business deal with a new logo) or expansion (upsell to an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+      - name: is_closed
+        type: categorical
+        description: True when the stage is closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+        description: Annualized contract value in USD of closed-won opportunities (new and expansion), by close date. Excludes open and lost opportunities.
+      - name: new_bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then amount_usd else 0 end
+        description: Annualized contract value in USD of closed-won new-business opportunities, by close date. Excludes expansion, open and lost opportunities.
+      - name: expansion_bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'expansion' then amount_usd else 0 end
+        description: Annualized contract value in USD of closed-won expansion opportunities, by close date.
+      - name: open_pipeline_usd
+        agg: sum
+        expr: case when stage = 'open' then amount_usd else 0 end
+        description: Annualized contract value in USD of open opportunities, by expected close date.
+      - name: won_opportunities
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+        description: Number of closed-won opportunities.
+      - name: closed_opportunities
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+        description: Number of closed opportunities (won + lost). Excludes open opportunities.
+      - name: won_new_opportunities
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then 1 else 0 end
+        description: Number of closed-won new-business opportunities.
+      - name: closed_new_opportunities
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') and opportunity_type = 'new' then 1 else 0 end
+        description: Number of closed (won + lost) new-business opportunities.
+
+metrics:
+  - name: bookings
+    label: Bookings
+    description: >
+      Annualized contract value (ACV) in USD of closed-won opportunities, new business plus
+      expansion, by close date. Excludes open and closed-lost opportunities. This is sales-booked
+      value, not billings or revenue.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings
+    description: ACV in USD of closed-won new-business (opportunity_type = new) opportunities, by close date. Excludes expansion, open and lost deals.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: ACV in USD of closed-won expansion (upsell) opportunities, by close date.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+
+  - name: open_pipeline
+    label: Open pipeline
+    description: ACV in USD of opportunities still open, by expected close date. Excludes won and lost deals.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd
+
+  - name: deals_won
+    label: Deals won
+    description: Number of closed-won opportunities (new and expansion), by close date.
+    type: simple
+    type_params:
+      measure: won_opportunities
+
+  - name: deals_closed
+    label: Deals closed
+    description: Number of closed opportunities (won + lost), by close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: closed_opportunities
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Count-based win rate = closed-won opportunities / closed opportunities (won + lost), by close
+      date, across new and expansion deals. Excludes open opportunities. Filter on
+      opportunity__opportunity_type or use new_business_win_rate for new logos only.
+    type: ratio
+    type_params:
+      numerator: deals_won
+      denominator: deals_closed
+
+  - name: new_deals_won
+    label: New-business deals won
+    description: Number of closed-won new-business opportunities, by close date.
+    type: simple
+    type_params:
+      measure: won_new_opportunities
+
+  - name: new_deals_closed
+    label: New-business deals closed
+    description: Number of closed (won + lost) new-business opportunities, by close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: closed_new_opportunities
+
+  - name: new_business_win_rate
+    label: New-business win rate
+    description: Count-based win rate for new-business opportunities only = closed-won new / closed (won + lost) new, by close date. Excludes expansion and open opportunities.
+    type: ratio
+    type_params:
+      numerator: new_deals_won
+      denominator: new_deals_closed

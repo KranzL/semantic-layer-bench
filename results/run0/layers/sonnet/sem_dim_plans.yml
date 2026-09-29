@@ -1,0 +1,22 @@
+semantic_models:
+  - name: sem_dim_plans
+    description: >
+      One row per sellable plan/price point (plan family x billing
+      interval), e.g. "Growth" billed monthly vs. "Growth Annual" billed
+      yearly. Dimension-only semantic model with no measures; supplies plan
+      attributes to metrics defined on subscription and revenue semantic
+      models via the plan_id join key.
+    model: ref('dim_plans')
+    entities:
+      - name: plan_id
+        type: primary
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: "The plan's display name, e.g. \"Growth\" or \"Growth Annual\"."
+      - name: plan_family
+        type: categorical
+        description: "The product tier the plan belongs to, independent of billing interval: Starter, Growth, Scale or Enterprise."
+      - name: billing_interval
+        type: categorical
+        description: "How often the plan is invoiced: month or year. Annual plans are priced at a discount to 12x the monthly price, not at parity."

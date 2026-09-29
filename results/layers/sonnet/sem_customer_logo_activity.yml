@@ -1,0 +1,114 @@
+version: 2
+
+semantic_models:
+  - name: sem_customer_logo_activity
+    description: >
+      One row per real (non-internal) account per month-end, flagging whether the account
+      was a paying customer that month (subscription status active or past_due, matching
+      the mrr/paying_customers definition), whether it was paying the prior month-end, and
+      derived logo-transition flags used for new-customer and churn metrics. Internal/QA
+      accounts are excluded entirely (not just from metrics -- they never appear as rows).
+      "New customer" here means the account's very first month as a paying customer ever;
+      an account that churns and later resubscribes is NOT counted as new again, and is
+      also not broken out separately as a "reactivation" -- it simply has no new_customer
+      row after its first one. Grain: one row per (account_id, month_end), for every
+      month-end from the account's first subscription activity through 2025-06-30.
+    model: ref('sm_customer_logo_activity')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account_month
+        type: primary
+        expr: "account_id || '-' || cast(month_end as varchar)"
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        expr: month_end
+        description: "The month-end this snapshot represents, matching the month_end dimension on the subscriptions semantic model."
+      - name: is_paying_customer
+        type: categorical
+        expr: is_paying_customer
+        description: "True if the account had at least one subscription with status active or past_due at this month-end."
+      - name: was_paying_prior_month
+        type: categorical
+        expr: was_paying_prior_month
+        description: "True if the account was a paying customer as of the immediately preceding month-end. False for an account's first-ever month-end snapshot (there is no prior month to compare to)."
+      - name: is_new_customer
+        type: categorical
+        expr: is_new_customer
+        description: "True only in the single month-end that is the account's first-ever month as a paying customer (first transition into active/past_due status). Not true again if the account later churns and resubscribes."
+      - name: is_churned_logo
+        type: categorical
+        expr: is_churned_logo
+        description: "True in the month an account was paying the prior month-end but is not paying this month-end -- i.e. the month the logo churned. Set again if a resubscribed account later churns a second time."
+    measures:
+      - name: account_month_count
+        expr: account_id
+        agg: count_distinct
+        description: >
+          Distinct count of accounts appearing on this model in a period. Combined with the
+          is_new_customer, is_churned_logo and was_paying_prior_month dimension filters,
+          this powers the new_customers, logo_churn, logo_churn_rate and
+          customers_start_of_period metrics.
+
+metrics:
+  - name: new_customers
+    label: New Customers
+    description: >
+      Count of accounts becoming a paying customer for the very first time in a given
+      month (first transition to subscription status active/past_due). Excludes accounts
+      starting a free trial (trialing does not count as new until it converts), and
+      excludes any account re-subscribing after a prior churn (those are not counted as
+      new again). Excludes internal/QA test accounts.
+    type: simple
+    type_params:
+      measure: account_month_count
+    filter: |
+      {{ Dimension('account_month__is_new_customer') }}
+
+  - name: logo_churn
+    label: Logo Churn
+    description: >
+      Count of accounts that were paying customers as of the prior month-end but are not
+      paying customers as of this month-end -- i.e. logos lost in the month. Counts a
+      resubscribed account again if it churns a second time. Excludes internal/QA test
+      accounts. Does not distinguish voluntary cancellation from involuntary
+      (payment-failure) churn -- an account only counts as churned once its status leaves
+      active/past_due entirely (a past_due account that is still past_due, not yet
+      canceled, is not counted as churned).
+    type: simple
+    type_params:
+      measure: account_month_count
+    filter: |
+      {{ Dimension('account_month__is_churned_logo') }}
+
+  - name: customers_start_of_period
+    label: Customers (Start of Period)
+    description: >
+      Count of accounts that were already paying customers as of the prior month-end,
+      measured within the current month-end's rows. Used as the denominator for
+      logo_churn_rate; not generally meant to be queried on its own since it is one month
+      behind the paying_customers metric for the same reported period. Excludes
+      internal/QA test accounts.
+    type: simple
+    type_params:
+      measure: account_month_count
+    filter: |
+      {{ Dimension('account_month__was_paying_prior_month') }}
+
+  - name: logo_churn_rate
+    label: Logo Churn Rate
+    description: >
+      The share of paying customers at the start of the month who churned during the
+      month: logo_churn / customers_start_of_period. Excludes internal/QA test accounts.
+      A ratio of 0.05 means 5% of the customers Relay had at the start of the month had
+      canceled by the end of it.
+    type: ratio
+    type_params:
+      numerator: logo_churn
+      denominator: customers_start_of_period

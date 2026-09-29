@@ -1,0 +1,168 @@
+version: 2
+
+# Conformed dimension semantic models. These carry no metrics of their own; fact models join to
+# them through the account, plan, sales_rep and calendar_date entities so every metric can be
+# sliced by segment, region, country, currency, plan, sales team and fiscal period.
+
+semantic_models:
+  - name: accounts
+    description: >
+      One row per billing account from dim_accounts (2,000 accounts). Includes every account ever
+      created: external customers, internal Relay QA/test accounts (is_internal = true, 60 accounts)
+      and soft-deleted accounts (is_deleted = true, 45 accounts, all of which have canceled
+      subscriptions). Child accounts of an enterprise parent are separate billing accounts with
+      their own subscriptions and invoices and keep their own segment/region. All metrics in the
+      semantic layer exclude internal accounts via account__is_internal = false; deleted accounts
+      are not excluded because their pre-deletion history is real customer activity.
+    model: ref('dim_accounts')
+    defaults:
+      agg_time_dimension: account_created_date
+    entities:
+      - name: account
+        description: Billing account identifier (account_id). Primary key; joined by every fact model.
+        type: primary
+        expr: account_id
+    dimensions:
+      - name: account_created_date
+        description: Calendar date the account record was created (created_at truncated to day).
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+      - name: account_name
+        description: Customer company name as stored on the account.
+        type: categorical
+      - name: segment
+        description: >
+          Customer size segment assigned to the billing account: SMB, MidMarket or Enterprise.
+          A child account keeps its own segment, which may differ from its parent's.
+        type: categorical
+      - name: region
+        description: Sales/geographic region of the billing account (NA, EMEA, APAC or LATAM).
+        type: categorical
+      - name: country
+        description: ISO-style two-letter country code of the billing account (US, GB, DE, JP, ...).
+        type: categorical
+      - name: billing_currency
+        description: >
+          Currency the account is invoiced in: USD, EUR, GBP or JPY. Matches the currency on the
+          account's subscriptions, invoices, payments and credit notes.
+        type: categorical
+      - name: is_internal
+        description: >
+          True for Relay's own QA/test accounts. Internal accounts have real-looking subscriptions,
+          invoices, credit notes and heavy API usage, so every metric filters them out.
+        type: categorical
+      - name: is_deleted
+        description: True when the account has been soft-deleted (deleted_at populated). Deleted accounts always have canceled subscriptions.
+        type: categorical
+      - name: parent_account_id
+        description: Account id of the enterprise parent for child accounts; null for stand-alone and parent accounts.
+        type: categorical
+      - name: has_parent_account
+        description: True when the account is a child of another (parent) account.
+        type: categorical
+        expr: parent_account_id is not null
+
+  - name: plans
+    description: >
+      One row per sellable plan from dim_plans (7 plans): Starter, Growth and Scale on monthly or
+      annual billing, plus Enterprise on annual billing only. list_price_usd is the USD list price
+      per seat per billing interval; actual subscription prices are stored per subscription version
+      in the customer's currency.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        description: Plan identifier (plan_id, e.g. PLN-GROWTH-M). Primary key.
+        type: primary
+        expr: plan_id
+    dimensions:
+      - name: plan_name
+        description: Display name of the plan, e.g. "Growth" or "Growth Annual".
+        type: categorical
+      - name: plan_family
+        description: Plan tier ignoring billing interval, Starter, Growth, Scale or Enterprise.
+        type: categorical
+      - name: plan_billing_interval
+        description: How often the plan is billed, month or year. Annual plans are invoiced once for 12 months up front.
+        type: categorical
+        expr: billing_interval
+      - name: plan_list_price_usd
+        description: USD list price per seat per billing interval (list_price_usd_minor / 100). Not the contracted price.
+        type: categorical
+        expr: list_price_usd_minor / 100.0
+
+  - name: sales_reps
+    description: >
+      One row per sales representative from dim_sales_reps (14 reps across the NA, EMEA, APAC and
+      LATAM sales teams). Joined by opportunities through the sales_rep entity. Reps are never
+      excluded; every opportunity has a rep.
+    model: ref('dim_sales_reps')
+    defaults:
+      agg_time_dimension: rep_hired_date
+    entities:
+      - name: sales_rep
+        description: Sales representative identifier (rep_id). Primary key.
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_name
+        description: Full name of the sales representative.
+        type: categorical
+      - name: sales_team
+        description: Sales team the rep belongs to, NA Sales, EMEA Sales, APAC Sales or LATAM Sales.
+        type: categorical
+        expr: team
+      - name: rep_region
+        description: Region the rep sells into (NA, EMEA, APAC, LATAM). May differ from the account's region.
+        type: categorical
+        expr: region
+      - name: rep_hired_date
+        description: Date the rep was hired.
+        type: time
+        expr: hired_at
+        type_params:
+          time_granularity: day
+
+  - name: fiscal_calendar
+    description: >
+      One row per calendar day from dim_date (2022-02-01 to 2027-01-31) with Relay's fiscal
+      calendar. The fiscal year runs February to January and is named for the calendar year in
+      which it ends (FY2025 = 2024-02-01 to 2025-01-31). Fact models expose a calendar_date entity
+      so flow metrics (billings, recognized revenue, cash, bookings, usage, customer flows) can
+      be grouped by fiscal year, quarter or month instead of calendar periods. Snapshot metrics
+      (mrr, arr, paying_customers, arpa, paid_seats) should be grouped by metric_time instead.
+    model: ref('dim_date')
+    defaults:
+      agg_time_dimension: calendar_day
+    entities:
+      - name: calendar_date
+        description: Calendar day (date_day). Primary key; fact models join on their event date.
+        type: primary
+        expr: date_day
+    dimensions:
+      - name: calendar_day
+        description: The calendar day itself.
+        type: time
+        expr: date_day
+        type_params:
+          time_granularity: day
+      - name: fiscal_year
+        description: Relay fiscal year (February to January), named for the calendar year in which it ends.
+        type: categorical
+      - name: fiscal_quarter
+        description: Fiscal quarter number 1-4 within the fiscal year (Q1 = February to April).
+        type: categorical
+      - name: fiscal_month
+        description: Fiscal month number 1-12 within the fiscal year (1 = February).
+        type: categorical
+      - name: fiscal_period
+        description: Fiscal year and quarter label, e.g. "FY2025 Q3", for convenient grouping.
+        type: categorical
+        expr: "'FY' || cast(fiscal_year as varchar) || ' Q' || cast(fiscal_quarter as varchar)"
+      - name: calendar_year
+        description: Calendar year of the day.
+        type: categorical
+      - name: is_month_end
+        description: True when the day is the last day of its calendar month (the day MRR snapshots are taken).
+        type: categorical

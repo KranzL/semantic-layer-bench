@@ -1,0 +1,65 @@
+version: 2
+
+semantic_models:
+  - name: sem_invoices
+    description: >
+      One row per invoice issued to a customer, covering both recurring subscription
+      invoices and one-off services invoices. Includes invoices in every lifecycle status
+      (draft, open, paid, uncollectible, void). The billings metric filters this down to
+      finalized invoices only. Grain: one row per invoice_id.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: issued_date
+        description: "The calendar date the invoice was issued to the customer. Billings are recognized on this date, regardless of the invoice's service period or when/whether it was ever paid."
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: "'subscription' for recurring plan invoices tied to a subscription, or 'services' for one-off, non-recurring charges (e.g. professional services) with no subscription_id."
+      - name: invoice_status
+        type: categorical
+        expr: status
+        description: "The invoice's lifecycle status: 'draft' (not yet finalized/sent), 'open' (sent, awaiting payment), 'paid' (fully collected), 'uncollectible' (written off, will not be collected), or 'void' (canceled, never owed). The billings metric includes open, paid and uncollectible (i.e. all finalized invoices) and excludes draft and void."
+      - name: invoice_currency
+        type: categorical
+        expr: currency
+        description: "The currency the invoice was issued in. The billings measure is already converted to USD at the invoice's issued-date fx rate; this dimension shows the original billing currency."
+    measures:
+      - name: billings_amount_usd
+        expr: total_minor / power(10, minor_unit_exponent) * usd_per_unit
+        agg: sum
+        description: >
+          Raw, unfiltered invoiced amount in USD: subtotal minus discount plus tax
+          (total_minor), converted to whole currency units and to USD at the issued-date fx
+          rate. Includes draft and void invoices at their face value. Does not filter by
+          invoice_status -- the `billings` metric applies the finalized-invoice filter on
+          top of this measure.
+
+metrics:
+  - name: billings
+    label: Billings
+    description: >
+      Total amount invoiced to customers, in USD, including tax, for finalized invoices
+      (status open, paid, or uncollectible) issued in the period -- both recurring
+      subscription invoices and one-off services invoices. Excludes draft invoices (not
+      yet finalized/sent) and void invoices (canceled, never owed). Recognized on the
+      invoice's issued date regardless of the service period it covers or whether it has
+      actually been collected -- for cash actually received, see cash_collected; for
+      revenue recognized ratably over the service period, see recognized_revenue.
+    type: simple
+    type_params:
+      measure: billings_amount_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} in ('open', 'paid', 'uncollectible')

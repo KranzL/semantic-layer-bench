@@ -1,0 +1,46 @@
+semantic_models:
+  - name: sem_usage
+    description: >
+      One row per account per calendar day per event type, with quantity
+      summed across all raw usage events of that type on that day.
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_id
+        type: primary
+        expr: account_id || '-' || cast(usage_date as varchar) || '-' || event_type
+      - name: account_id
+        type: foreign
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The calendar date the usage occurred.
+      - name: event_type
+        type: categorical
+        description: "api_call (metered, billable API request) or health_check (fixed-rate uptime/heartbeat ping emitted automatically at a constant frequency, never billed)."
+    measures:
+      - name: usage_quantity
+        agg: sum
+        expr: quantity
+        description: >
+          Total event quantity for every event type, including
+          non-billable health_check events. Always used together with the
+          event_type filter (via the billable_usage metric) -- summing this
+          measure directly would mix in health_check volume.
+
+metrics:
+  - name: billable_usage
+    description: >
+      Total metered, billable API-call usage (event_type = api_call),
+      excluding health_check events (fixed-rate internal
+      uptime/heartbeat pings that are never billed) and excluding
+      Relay's internal/test accounts.
+    type: simple
+    type_params:
+      measure: usage_quantity
+    filter: |
+      {{ Dimension('usage_id__event_type') }} = 'api_call'
+      and not {{ Dimension('account_id__is_internal') }}

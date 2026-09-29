@@ -1,0 +1,150 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: One row per sales opportunity. Includes new-business and expansion opportunities in every stage (open, closed_won, closed_lost) for external, non-deleted accounts, each owned by a sales rep. Excludes internal test and demo accounts and deleted accounts. Amounts are pre-recorded USD contract values. Booked amounts are nonzero for closed_won rows only.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: row_key
+        description: Unique key for one opportunity. Includes the opportunity id. Used only as the row grain.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity closed, or the expected close date for open pipeline. Includes close dates from 2023-01-15 onward, including future expected dates for open opportunities. Excludes nothing. Bookings metrics attribute to this date.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created. Includes creation dates from 2022-11-13 through 2025-06-30. Excludes nothing.
+      - name: opportunity_id
+        type: categorical
+        description: Opportunity identifier. Includes one value per opportunity. Excludes nothing.
+      - name: opportunity_type
+        type: categorical
+        description: Opportunity kind (new for new business, expansion for upsell to an existing customer). Includes both kinds. New bookings count new only.
+      - name: opportunity_stage
+        type: categorical
+        description: Sales stage (open, closed_won, closed_lost). Includes all three stages. Bookings count closed_won, win rate compares closed_won to closed_won plus closed_lost, and pipeline counts open.
+      - name: rep_id
+        type: categorical
+        description: Owning sales rep identifier. Includes the assigned rep of every opportunity. Excludes nothing.
+      - name: sales_rep
+        type: categorical
+        description: Owning sales rep display name. Includes the assigned rep of every opportunity. Excludes nothing.
+      - name: sales_team
+        type: categorical
+        description: Owning sales team (NA Sales, EMEA Sales, APAC Sales, LATAM Sales). Includes the team of every opportunity owner. Excludes nothing.
+      - name: sales_region
+        type: categorical
+        description: Region of the owning sales team. Includes the team region, which can differ from the account region. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Prospect or customer account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Prospect or customer account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the account region, which can differ from the sales team region. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+    measures:
+      - name: bookings_usd
+        description: Sum of closed-won contract values in USD. Includes closed_won new and expansion opportunities of external, non-deleted accounts. Excludes open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: booked_usd
+      - name: new_bookings_usd
+        description: Sum of closed-won new-business contract values in USD. Includes closed_won opportunities of type new for external, non-deleted accounts. Excludes expansion deals, open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: new_booked_usd
+      - name: expansion_bookings_usd
+        description: Sum of closed-won expansion contract values in USD. Includes closed_won opportunities of type expansion for external, non-deleted accounts. Excludes new-business deals, open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: expansion_booked_usd
+      - name: closed_amount_usd
+        description: Sum of closed (won plus lost) contract values in USD. Includes closed_won and closed_lost opportunities of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: closed_usd
+      - name: open_pipeline_usd
+        description: Sum of open pipeline contract values in USD at expected close dates. Includes open new and expansion opportunities of external, non-deleted accounts. Excludes closed deals, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: open_usd
+      - name: won_opp_count
+        description: Count of distinct closed-won opportunities. Includes closed_won new and expansion deals of external, non-deleted accounts. Excludes open and closed_lost deals, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: won_opp_id
+      - name: closed_opp_count
+        description: Count of distinct closed opportunities, won plus lost. Includes closed_won and closed_lost deals of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: closed_opp_id
+      - name: open_opp_count
+        description: Count of distinct open opportunities. Includes open new and expansion deals of external, non-deleted accounts. Excludes closed deals, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: open_opp_id
+
+metrics:
+  - name: bookings
+    description: Closed-won contract value in USD by close date. Includes closed_won new and expansion opportunities of external, non-deleted accounts. Excludes open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: bookings_usd
+  - name: new_bookings
+    description: Closed-won new-business contract value in USD by close date. Includes closed_won opportunities of type new for external, non-deleted accounts. Excludes expansion deals, open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+  - name: expansion_bookings
+    description: Closed-won expansion contract value in USD by close date. Includes closed_won opportunities of type expansion for external, non-deleted accounts. Excludes new-business deals, open pipeline, closed_lost deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+  - name: won_opportunities
+    description: Count of closed-won opportunities. Includes closed_won new and expansion deals of external, non-deleted accounts. Excludes open and closed_lost deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: won_opp_count
+  - name: closed_opportunities
+    description: Count of closed opportunities, won plus lost. Includes closed_won and closed_lost deals of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: closed_opp_count
+  - name: win_rate
+    description: Share of closed opportunities won by deal count, won opportunities divided by closed opportunities. Includes closed_won and closed_lost deals of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+  - name: win_rate_by_amount
+    description: Share of closed contract value won, bookings divided by closed amount. Includes closed_won and closed_lost dollars of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+    type: ratio
+    type_params:
+      numerator: bookings
+      denominator: closed_amount
+  - name: closed_amount
+    description: Closed (won plus lost) contract value in USD by close date, the win-rate-by-amount denominator. Includes closed_won and closed_lost opportunities of external, non-deleted accounts. Excludes open pipeline, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: closed_amount_usd
+  - name: open_pipeline
+    description: Open pipeline contract value in USD by expected close date. Includes open new and expansion opportunities of external, non-deleted accounts. Excludes closed deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd
+  - name: open_opportunities
+    description: Count of open pipeline opportunities. Includes open new and expansion deals of external, non-deleted accounts. Excludes closed deals, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: open_opp_count

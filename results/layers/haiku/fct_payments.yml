@@ -1,0 +1,49 @@
+semantic_model:
+  name: fct_payments
+  description: >
+    Payment fact table. One row per payment received.
+    Only includes succeeded payments. Excludes payments for deleted or internal accounts.
+  node_relation:
+    schema_name: marts
+    alias: fct_payments
+  defaults:
+    agg_time_dimension: received_date
+  measures:
+    - name: cash_collected
+      description: Cash collected from customers in USD. Sum of all succeeded payments.
+      agg: sum
+      expr: (amount_minor * usd_per_unit) / pow(10, minor_unit_exponent)
+    - name: count_payments
+      description: Count of payments received
+      agg: count
+  dimensions:
+    - name: payment_id
+      description: Unique payment identifier
+      type: categorical
+      primary_key: true
+    - name: received_date
+      description: Date payment was received
+      type: time
+      time_granularity: day
+    - name: account_id
+      description: Customer account that made this payment
+      type: categorical
+      role: foreign_key
+    - name: invoice_id
+      description: Invoice associated with this payment
+      type: categorical
+    - name: status
+      description: Payment status (processing, succeeded, failed, refunded)
+      type: categorical
+    - name: method
+      description: Payment method (card, ach, wire, etc.)
+      type: categorical
+    - name: currency
+      description: Payment currency (USD, EUR, GBP, JPY)
+      type: categorical
+    - name: amount_minor
+      description: Payment amount (in minor currency units)
+      type: numeric
+    - name: usd_per_unit
+      description: FX rate to USD as of payment received date
+      type: numeric

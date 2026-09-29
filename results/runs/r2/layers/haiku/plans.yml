@@ -1,0 +1,32 @@
+version: 2
+
+semantic_models:
+  - name: plans
+    description: Billing plans with pricing and intervals.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        role: identifier
+        expr: plan_id
+    dimensions:
+      - name: plan_id
+        type: categorical
+        expr: plan_id
+        description: Unique plan identifier
+      - name: plan_name
+        type: categorical
+        expr: plan_name
+        description: Display name of the plan
+      - name: plan_family
+        type: categorical
+        expr: plan_family
+        description: Product family/tier - Starter, Growth, Scale, or Enterprise
+      - name: billing_interval
+        type: categorical
+        expr: billing_interval
+        description: Billing interval - month or year
+      - name: list_price_usd_minor
+        type: categorical
+        expr: list_price_usd_minor
+        description: List price per seat in USD minor units (1/100th of a dollar)

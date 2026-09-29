@@ -1,0 +1,406 @@
+version: 2
+
+# Finance flow metrics: billings, recognized revenue, cash collected, refunds.
+# All money measures are converted to USD from the currency's minor units
+# (amount_minor / 10^minor_unit_exponent x usd_per_unit); JPY has exponent 0.
+
+semantic_models:
+  - name: invoices
+    description: >
+      One row per invoice from fct_invoices (11,695 invoices, 2023-01 to 2025-06). Two invoice
+      types: subscription (recurring seat charges for a service period, 11,535) and services
+      (one-off professional services, 160, no service period). Statuses: draft (not yet issued to
+      the customer), open (issued, awaiting payment), paid, uncollectible (issued, written off as
+      bad debt) and void (canceled, never owed). Amounts are in the invoice currency's minor
+      units with the USD FX rate on the issue date; subtotal is seats x unit price, discount is
+      the contractual discount, total = subtotal - discount + tax. Includes internal accounts;
+      metrics exclude them.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        description: Invoice identifier (invoice_id). Primary key.
+        type: primary
+        expr: invoice_id
+      - name: account
+        description: Billed account; joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: subscription
+        description: Subscription the invoice bills; null for services invoices.
+        type: foreign
+        expr: subscription_id
+      - name: calendar_date
+        description: Issue date; joins to fiscal_calendar.
+        type: foreign
+        expr: issued_date
+    dimensions:
+      - name: issued_date
+        description: Calendar date the invoice was issued (billing date). Draft invoices also carry an issue date.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: due_date
+        description: Payment due date of the invoice.
+        type: time
+        expr: due_at
+        type_params:
+          time_granularity: day
+      - name: service_period_start
+        description: First day of the service period covered (subscription invoices); equals the issue date for services invoices.
+        type: time
+        expr: period_start
+        type_params:
+          time_granularity: day
+      - name: service_period_end
+        description: Day after the last day of the service period covered (exclusive); equals period_start for services invoices.
+        type: time
+        expr: period_end
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        description: subscription (recurring seat charges) or services (one-off professional services).
+        type: categorical
+      - name: invoice_status
+        description: Current status, draft, open, paid, uncollectible or void. Draft and void invoices are never counted as billed.
+        type: categorical
+        expr: status
+      - name: currency
+        description: Invoice currency (USD, EUR, GBP or JPY); always the account's billing currency.
+        type: categorical
+      - name: invoice_number
+        description: Human-readable invoice number (R-YYYY-NNNNNN).
+        type: categorical
+    measures:
+      - name: billings_net_usd
+        description: Invoice subtotal minus discount, before tax, converted to USD at the issue-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: (subtotal_minor - discount_minor) / power(10, minor_unit_exponent) * usd_per_unit
+      - name: billings_gross_usd
+        description: Invoice total including tax (subtotal - discount + tax), converted to USD at the issue-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: total_minor / power(10, minor_unit_exponent) * usd_per_unit
+      - name: invoice_tax_usd
+        description: Tax charged on the invoice, converted to USD at the issue-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: tax_minor / power(10, minor_unit_exponent) * usd_per_unit
+      - name: invoice_discount_usd
+        description: Contractual discount deducted on the invoice, converted to USD at the issue-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: discount_minor / power(10, minor_unit_exponent) * usd_per_unit
+      - name: invoice_count
+        description: Number of invoice rows. Unfiltered by status.
+        agg: count
+        expr: invoice_id
+
+  - name: revenue_recognition
+    description: >
+      Recognized revenue schedule from fct_revenue_recognition: one row per invoice per calendar
+      month in which revenue is recognized. Subscription invoices are recognized straight-line
+      by day across their service period (so an annual invoice spreads over 12-13 months, out to
+      2026-06); services invoices are recognized in full in the month issued. Amounts are
+      subtotal minus discount (no tax) in minor units, with the USD FX rate fixed at the
+      invoice's issue date. Carries the invoice's current status and includes draft, void and
+      uncollectible invoices and internal accounts; the recognized_revenue metric filters them.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    primary_entity: revenue_schedule_row
+    entities:
+      - name: invoice
+        description: Invoice the recognized amount belongs to.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: Billed account; joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: calendar_date
+        description: First day of the recognition month; joins to fiscal_calendar.
+        type: foreign
+        expr: recognized_month
+    dimensions:
+      - name: recognized_month
+        description: Calendar month (first day) in which the revenue is recognized.
+        type: time
+        type_params:
+          time_granularity: month
+      - name: invoice_type
+        description: subscription (straight-line over the service period) or services (recognized when issued).
+        type: categorical
+      - name: invoice_status
+        description: Current status of the underlying invoice (draft, open, paid, uncollectible, void).
+        type: categorical
+        expr: status
+      - name: currency
+        description: Currency of the underlying invoice (USD, EUR, GBP or JPY).
+        type: categorical
+    measures:
+      - name: recognized_revenue_usd
+        description: Revenue recognized in the month, net of discount and before tax, converted to USD at the invoice issue-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+
+  - name: payments
+    description: >
+      One row per payment attempt from fct_payments (11,504 attempts, 2023-01 to 2025-06). Status
+      is succeeded or failed; a failed attempt moves no money and is usually retried. Every paid
+      invoice has exactly one succeeded payment for its full total (including tax); there are no
+      partial payments, overpayments or negative (refund) payments. Amounts are in the invoice
+      currency with the USD FX rate on the received date. Includes internal accounts; metrics exclude them.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        description: Payment identifier (payment_id). Primary key.
+        type: primary
+        expr: payment_id
+      - name: invoice
+        description: Invoice the payment settles.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: Paying account; joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: calendar_date
+        description: Received date; joins to fiscal_calendar.
+        type: foreign
+        expr: received_date
+    dimensions:
+      - name: received_date
+        description: Calendar date the payment attempt was received/processed.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: payment_status
+        description: succeeded (cash received) or failed (declined/bounced, no cash).
+        type: categorical
+        expr: status
+      - name: payment_method
+        description: card, ach or wire.
+        type: categorical
+        expr: method
+      - name: currency
+        description: Payment currency (USD, EUR, GBP or JPY); always equals the invoice currency.
+        type: categorical
+    measures:
+      - name: payment_amount_usd
+        description: Payment amount including tax, converted to USD at the received-date FX rate. Unfiltered by status.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+      - name: payment_count
+        description: Number of payment attempts. Unfiltered by status.
+        agg: count
+        expr: payment_id
+
+  - name: credit_notes
+    description: >
+      One row per credit note from fct_credit_notes (279 notes). Every credit note is issued
+      against a paid subscription invoice after its payment, so it represents money returned or
+      credited back to the customer. Reasons: billing_error, downgrade_adjustment (prorated
+      credit after a downgrade), service_credit (SLA/service credit) and goodwill. Amounts are in
+      the invoice currency with the USD FX rate on the credit note date and never exceed the
+      invoice total. Includes internal accounts; metrics exclude them.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: credit_note_date
+    entities:
+      - name: credit_note
+        description: Credit note identifier (credit_note_id). Primary key.
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        description: Paid invoice the credit note is issued against.
+        type: foreign
+        expr: invoice_id
+      - name: account
+        description: Credited account; joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: calendar_date
+        description: Credit note issue date; joins to fiscal_calendar.
+        type: foreign
+        expr: issued_date
+    dimensions:
+      - name: credit_note_date
+        description: Calendar date the credit note was issued.
+        type: time
+        expr: issued_date
+        type_params:
+          time_granularity: day
+      - name: credit_reason
+        description: Why the credit was given, billing_error, downgrade_adjustment, service_credit or goodwill.
+        type: categorical
+        expr: reason
+      - name: currency
+        description: Credit note currency (USD, EUR, GBP or JPY); always equals the invoice currency.
+        type: categorical
+    measures:
+      - name: credit_note_amount_usd
+        description: Credit note amount converted to USD at the credit-note-date FX rate.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+      - name: credit_note_count
+        description: Number of credit notes.
+        agg: count
+        expr: credit_note_id
+
+metrics:
+  - name: billings
+    label: Billings (net of discount, before tax)
+    description: >
+      USD value invoiced to external customers in the period, by invoice issue date: subtotal
+      minus contractual discount, before tax, for subscription and services invoices with status
+      open, paid or uncollectible. Excludes draft invoices (not issued), void invoices (canceled),
+      tax, credit notes and internal accounts. Converted at the issue-date FX rate. Annual plans
+      are billed 12 months up front, so billings lead recognized revenue.
+    type: simple
+    type_params:
+      measure: billings_net_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} in ('open', 'paid', 'uncollectible')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: billings_incl_tax
+    label: Billings including tax
+    description: >
+      USD total of invoices issued to external customers in the period including tax (subtotal -
+      discount + tax), for status open, paid or uncollectible. Same exclusions as billings
+      (draft, void, credit notes, internal accounts). This is the amount customers are asked to pay.
+    type: simple
+    type_params:
+      measure: billings_gross_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} in ('open', 'paid', 'uncollectible')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: invoice_tax
+    label: Invoice tax
+    description: USD tax charged on invoices issued to external customers (status open, paid or uncollectible). Excludes draft, void and internal accounts.
+    type: simple
+    type_params:
+      measure: invoice_tax_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} in ('open', 'paid', 'uncollectible')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: invoices_issued
+    label: Invoices issued
+    description: Number of invoices issued to external customers in the period (status open, paid or uncollectible). Excludes draft, void and internal accounts.
+    type: simple
+    type_params:
+      measure: invoice_count
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} in ('open', 'paid', 'uncollectible')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: uncollectible_billings
+    label: Uncollectible billings (bad debt)
+    description: >
+      USD net billings (subtotal minus discount, before tax) of invoices to external customers
+      that have been written off as uncollectible, by issue date. A subset of billings; excluded
+      from recognized_revenue. Excludes draft, void, open, paid and internal accounts.
+    type: simple
+    type_params:
+      measure: billings_net_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} = 'uncollectible'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: open_receivables
+    label: Open receivables
+    description: >
+      USD total including tax of invoices to external customers that are issued but not yet paid
+      (status open), by issue date. Excludes draft, paid, uncollectible, void and internal accounts.
+    type: simple
+    type_params:
+      measure: billings_gross_usd
+    filter: |
+      {{ Dimension('invoice__invoice_status') }} = 'open'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: >
+      USD revenue recognized in the period for external customers. Subscription invoices are
+      recognized straight-line by day over their service period; services invoices in the month
+      issued. Net of discount, before tax, at the invoice issue-date FX rate. Includes only
+      invoices with status open or paid; excludes draft (not issued), void (canceled) and
+      uncollectible (written off) invoices, credit notes and internal accounts. Because annual
+      invoices spread forward, the schedule extends to 2026-06 for invoices issued through 2025-06.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+    filter: |
+      {{ Dimension('revenue_schedule_row__invoice_status') }} in ('open', 'paid')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: cash_collected
+    label: Cash collected
+    description: >
+      USD cash received from external customers in the period, by payment received date:
+      succeeded payments only, including the tax portion of the invoice, converted at the
+      received-date FX rate. Excludes failed payment attempts, internal accounts and credit
+      notes/refunds (see refunds), which are not netted off.
+    type: simple
+    type_params:
+      measure: payment_amount_usd
+    filter: |
+      {{ Dimension('payment__payment_status') }} = 'succeeded'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: payments_received
+    label: Payments received
+    description: Number of succeeded payments from external customers in the period. Excludes failed attempts and internal accounts.
+    type: simple
+    type_params:
+      measure: payment_count
+    filter: |
+      {{ Dimension('payment__payment_status') }} = 'succeeded'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: failed_payments
+    label: Failed payments
+    description: Number of failed payment attempts from external customers in the period. Excludes succeeded payments and internal accounts.
+    type: simple
+    type_params:
+      measure: payment_count
+    filter: |
+      {{ Dimension('payment__payment_status') }} = 'failed'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: refunds
+    label: Refunds and credits
+    description: >
+      USD value of credit notes issued to external customers in the period, by credit note date.
+      Every credit note is raised against an already-paid subscription invoice, so this is money
+      refunded or credited back for all four reasons (billing_error, downgrade_adjustment,
+      service_credit, goodwill); slice by credit_reason to separate them. Excludes internal
+      accounts. Not deducted from billings, recognized_revenue or cash_collected.
+    type: simple
+    type_params:
+      measure: credit_note_amount_usd
+    filter: |
+      {{ Dimension('account__is_internal') }} = false
+
+  - name: credit_notes_issued
+    label: Credit notes issued
+    description: Number of credit notes issued to external customers in the period, all reasons. Excludes internal accounts.
+    type: simple
+    type_params:
+      measure: credit_note_count
+    filter: |
+      {{ Dimension('account__is_internal') }} = false
+
+  - name: net_cash_collected
+    label: Net cash collected
+    description: cash_collected minus refunds in the same period (USD). Treats all credit notes as cash out, including service credits. Periods with no credit notes subtract zero.
+    type: derived
+    type_params:
+      expr: cash_collected - coalesce(refunds, 0)
+      metrics:
+        - name: cash_collected
+        - name: refunds

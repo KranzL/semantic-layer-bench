@@ -1,0 +1,100 @@
+version: 2
+
+semantic_models:
+  - name: payments
+    label: Payments
+    description: >
+      One row per payment attempt against an invoice of an external account
+      (built from marts.fct_payments by sem_payments), dated by the day received.
+      Includes succeeded and failed attempts by card, ACH and wire; every paid
+      invoice has exactly one succeeded payment for its full total including tax.
+      Excludes internal accounts. Amounts are converted to USD at the FX rate on
+      the day received. Cash collected counts succeeded payments only.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+        description: The payment attempt.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice the payment settles.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that paid.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account).
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan billed on the invoice; null for services invoices.
+      - name: calendar_date
+        type: foreign
+        expr: received_date
+        description: Date received, for fiscal calendar attributes.
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the payment was received (or attempted, for failures).
+      - name: payment_status
+        type: categorical
+        expr: status
+        description: succeeded (money received) or failed (attempt declined, no money moved).
+      - name: payment_method
+        type: categorical
+        expr: method
+        description: card, ach or wire.
+      - name: invoice_type
+        type: categorical
+        description: subscription or services, from the invoice paid.
+      - name: billing_interval
+        type: categorical
+        description: month or year from the plan billed; null for services.
+      - name: plan_family
+        type: categorical
+        description: Product tier billed; null for services invoices.
+      - name: currency
+        type: categorical
+        description: Payment currency (matches the invoice currency).
+    measures:
+      - name: cash_collected_usd
+        label: Cash collected (USD)
+        agg: sum
+        expr: case when is_succeeded then amount_usd else 0 end
+        description: >
+          Succeeded payments in USD at the FX rate on the day received. Gross of
+          refunds and inclusive of sales tax, because that is the cash that hit
+          the bank. Excludes failed attempts and internal accounts.
+      - name: cash_collected_local
+        label: Cash collected (local currency)
+        agg: sum
+        expr: case when is_succeeded then amount_local else 0 end
+        description: Succeeded payments in the payment currency. Only meaningful when grouped or filtered by currency.
+      - name: failed_payment_usd
+        label: Failed payment amount (USD)
+        agg: sum
+        expr: case when is_failed then amount_usd else 0 end
+        description: USD value of declined payment attempts. Not cash; useful for collections analysis.
+      - name: successful_payment_count
+        label: Successful payments
+        agg: sum
+        expr: case when is_succeeded then 1 else 0 end
+        description: Number of succeeded payments.
+      - name: failed_payment_count
+        label: Failed payments
+        agg: sum
+        expr: case when is_failed then 1 else 0 end
+        description: Number of failed payment attempts.
+      - name: days_to_pay_total
+        label: Days to pay (sum)
+        agg: sum
+        expr: case when is_succeeded then days_to_pay else 0 end
+        description: Sum of days between invoice issue and successful payment; divide by successful payments for the average.

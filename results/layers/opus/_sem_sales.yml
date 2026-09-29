@@ -1,0 +1,142 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      Sales opportunities, one row per opportunity, dated by close date (expected close date for
+      open opportunities). amount_usd is the annual contract value in USD. Types: new (new
+      logo) and expansion (upsell to an existing customer). Stages: open, closed_won, closed_lost.
+      All opportunities belong to external accounts.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity identifier.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account the opportunity is for.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales rep (join for team and rep region).
+      - name: calendar_date
+        type: foreign
+        expr: close_date
+        description: Close date, for fiscal calendar attributes.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity closed (won or lost), or expected close date if still open.
+      - name: opportunity_created_date
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created.
+      - name: opportunity_type
+        type: categorical
+        description: new (new-logo deal) or expansion (upsell to an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+        description: Annual contract value (USD) of closed-won opportunities, new and expansion. Excludes open and lost deals.
+      - name: won_deals
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+        description: Number of closed-won opportunities.
+      - name: lost_deals
+        agg: sum
+        expr: case when stage = 'closed_lost' then 1 else 0 end
+        description: Number of closed-lost opportunities.
+      - name: closed_deals
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+        description: Number of closed opportunities (won + lost). Excludes open opportunities.
+      - name: open_pipeline_usd
+        agg: sum
+        expr: case when stage = 'open' then amount_usd else 0 end
+        description: Contract value (USD) of opportunities still open, by expected close date.
+
+metrics:
+  - name: bookings
+    label: Bookings (USD)
+    description: >
+      Annual contract value (USD) of closed-won opportunities by close date, new-logo and
+      expansion. Excludes open and closed-lost opportunities.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings (USD)
+    description: Annual contract value (USD) of closed-won opportunities of type new (new logos) by close date. Excludes expansion, open and lost deals.
+    type: simple
+    type_params:
+      measure: bookings_usd
+    filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: expansion_bookings
+    label: Expansion bookings (USD)
+    description: Annual contract value (USD) of closed-won expansion opportunities by close date. Excludes new-logo, open and lost deals.
+    type: simple
+    type_params:
+      measure: bookings_usd
+    filter: "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+
+  - name: won_deals
+    label: Won deals
+    description: Number of closed-won opportunities (new and expansion) by close date.
+    type: simple
+    type_params:
+      measure: won_deals
+
+  - name: lost_deals
+    label: Lost deals
+    description: Number of closed-lost opportunities (new and expansion) by close date.
+    type: simple
+    type_params:
+      measure: lost_deals
+
+  - name: closed_deals
+    label: Closed deals
+    description: Number of closed opportunities (won + lost) by close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: closed_deals
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Closed-won opportunities / closed opportunities (won + lost), by count, by close date.
+      Open opportunities are excluded from numerator and denominator. Covers new and expansion;
+      filter or group by opportunity__opportunity_type for one type.
+    type: ratio
+    type_params:
+      numerator: won_deals
+      denominator: closed_deals
+
+  - name: new_business_win_rate
+    label: New-business win rate
+    description: Win rate (won / (won + lost), by count, by close date) for new-logo opportunities only. Excludes expansion and open opportunities.
+    type: ratio
+    type_params:
+      numerator: won_deals
+      denominator: closed_deals
+    filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: open_pipeline
+    label: Open pipeline (USD)
+    description: Contract value (USD) of opportunities still open, by expected close date. Excludes closed deals.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd

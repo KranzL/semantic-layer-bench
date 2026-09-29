@@ -1,0 +1,56 @@
+version: 2
+
+semantic_models:
+  - name: sem_accounts
+    description: >
+      One row per customer account (company). Includes every account Relay has ever
+      created, including internal/QA test accounts (is_internal = true) and accounts that
+      have since been deleted from the CRM (deleted_at is not null). Does not include any
+      revenue, subscription, or usage activity itself -- it exists to supply account-level
+      dimensions (segment, region, country, currency) for slicing metrics defined on other
+      semantic models via the `account` entity. Grain: one row per account_id.
+    model: ref('dim_accounts')
+    defaults:
+      agg_time_dimension: account_created_date
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+      - name: parent_account
+        type: foreign
+        expr: parent_account_id
+    dimensions:
+      - name: account_created_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: created_date
+        description: "The calendar date the account record was created in Relay. Does not indicate when the account became a paying customer (see is_new_customer on the customer logo activity semantic model for that)."
+      - name: account_name
+        type: categorical
+        expr: account_name
+        description: "The account's display/company name. High cardinality; useful for lookups, not for aggregation."
+      - name: country
+        type: categorical
+        expr: country
+        description: "ISO country code of the account's billing address. One value per account."
+      - name: region
+        type: categorical
+        expr: region
+        description: "Sales/ops region the account is assigned to (NA, EMEA, APAC, LATAM). Distinct from the sales rep's region on the sales_rep entity, which reflects rep assignment rather than customer location."
+      - name: segment
+        type: categorical
+        expr: segment
+        description: "Customer size segment (SMB, MidMarket, Enterprise) used for finance and sales reporting cuts. Reflects the account's current segment only, not its segment history."
+      - name: account_billing_currency
+        type: categorical
+        expr: billing_currency
+        description: "The currency the account is billed in (USD, EUR, GBP, JPY). This is the account's nominal billing currency; individual invoices, payments, credit notes and subscriptions carry their own currency field which should normally match this."
+      - name: is_internal
+        type: categorical
+        expr: is_internal
+        description: "True for Relay's own internal and QA/test accounts (e.g. 'Relay QA ###'). These are not real customers: all customer-facing metrics in this project (MRR, ARR, billings, revenue, cash collected, paying customers, bookings) explicitly exclude internal accounts, either by filtering this flag directly or by building on a fact that has already excluded it."
+      - name: is_deleted
+        type: categorical
+        expr: is_deleted
+        description: "True if the account has since been deleted/merged in the CRM (deleted_at is not null). Deleted accounts are NOT excluded from historical revenue and subscription metrics -- their past activity was real -- this flag only tells you the account record is no longer active in the CRM today."

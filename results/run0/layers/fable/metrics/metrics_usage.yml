@@ -1,0 +1,43 @@
+version: 2
+
+metrics:
+  - name: billable_usage
+    label: Billable usage (API calls)
+    description: >
+      Number of api_call events by external accounts on days when the account had
+      an active or past_due subscription, dated by usage day. Excludes
+      health_check heartbeat events, usage during free trials and internal
+      accounts. Slice by account__segment, account__region or
+      customer__segment.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+
+  - name: api_calls
+    label: API calls (all)
+    description: All api_call events by external accounts, including free-trial usage. Excludes health checks and internal accounts.
+    type: simple
+    type_params:
+      measure: api_call_quantity
+
+  - name: health_checks
+    label: Health checks
+    description: Platform heartbeat events (288 per account per day). Never billable; provided for completeness.
+    type: simple
+    type_params:
+      measure: health_check_quantity
+
+  - name: accounts_with_billable_usage
+    label: Accounts with billable usage
+    description: Distinct billing accounts with at least one billable api_call in the period.
+    type: simple
+    type_params:
+      measure: accounts_with_billable_usage
+
+  - name: billable_usage_per_account
+    label: Billable usage per account
+    description: billable_usage divided by accounts_with_billable_usage in the period.
+    type: ratio
+    type_params:
+      numerator: billable_usage
+      denominator: accounts_with_billable_usage

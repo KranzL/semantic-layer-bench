@@ -1,0 +1,160 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    label: Subscription month-end snapshot
+    description: >
+      Point-in-time snapshot of every subscription at each month end from
+      2023-01-31 to 2025-06-30, one row per subscription per month (built from
+      marts.fct_subscription_months by sem_subscription_months).
+      Includes: subscriptions of all external accounts, in every status (active,
+      past_due, trialing, canceled), deduplicated to the newest version where two
+      versions overlap.
+      Excludes: internal Relay accounts (demo, QA, sandbox, internal).
+      MRR here is contracted recurring revenue: seats x per-seat price x
+      (1 - discount), divided by 12 for annual plans, converted to USD at the
+      month-end FX rate. Only active and past_due subscriptions carry MRR;
+      trialing and canceled rows carry zero. Values are balances, not flows:
+      querying at quarter or year granularity returns the last month end of the
+      period, not a sum.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_month_id
+        description: Surrogate key subscription_id | month_end.
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: The subscription being snapshotted.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that owns the subscription.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account) the subscription rolls up to.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan in force at the month end.
+      - name: calendar_date
+        type: foreign
+        expr: month_end
+        description: Month-end date, for fiscal calendar attributes.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: >
+          The month-end date of the snapshot (stored as the last day of the month).
+          At month granularity this is the reporting month.
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: >
+          Status of the subscription version in force at month end: active,
+          past_due (still subscribed, payment overdue), trialing (free trial, not
+          yet paying) or canceled (ended; kept for history, carries no MRR).
+      - name: is_paying
+        type: categorical
+        description: True when status is active or past_due; only these rows carry MRR and count as paying.
+      - name: is_trialing
+        type: categorical
+        description: True when the subscription is in a free trial at month end.
+      - name: billing_interval
+        type: categorical
+        description: month or year; annual per-seat prices are divided by 12 for MRR.
+      - name: plan_family
+        type: categorical
+        description: "Product tier of the plan at month end: Starter, Growth, Scale or Enterprise."
+      - name: currency
+        type: categorical
+        description: Currency the subscription is priced in (USD, EUR, GBP, JPY).
+      - name: has_discount
+        type: categorical
+        description: True when a percentage discount (up to 20 percent) applies to the per-seat price.
+      - name: seat_band
+        type: categorical
+        expr: >
+          case when seats < 10 then '01-09' when seats < 50 then '10-49'
+               when seats < 100 then '50-99' when seats < 250 then '100-249'
+               else '250+' end
+        description: Contracted seat count bucketed into bands.
+    measures:
+      - name: mrr_usd
+        label: MRR (USD)
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at the month-end FX rate. Sum of
+          seats x per-seat price x (1 - discount) per month for active and past_due
+          subscriptions of external accounts. Zero for trialing and canceled rows.
+          Excludes tax, usage, services and one-off charges. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: mrr_local
+        label: MRR (local currency)
+        agg: sum
+        expr: mrr_local
+        description: >
+          The same MRR in the subscription's own currency (major units). Only
+          meaningful when grouped or filtered by currency; summing across currencies
+          mixes units. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_customer_count
+        label: Paying customers
+        agg: count_distinct
+        expr: case when is_paying then customer_id end
+        description: >
+          Distinct customers (top-level accounts, children rolled into parents)
+          with at least one active or past_due subscription at month end.
+          Excludes trials, canceled subscriptions and internal accounts.
+          Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_account_count
+        label: Paying accounts
+        agg: count_distinct
+        expr: case when is_paying then account_id end
+        description: >
+          Distinct billing accounts (parents and children counted separately)
+          with an active or past_due subscription at month end. Excludes trials,
+          canceled subscriptions and internal accounts. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_subscription_count
+        label: Paying subscriptions
+        agg: count_distinct
+        expr: case when is_paying then subscription_id end
+        description: Distinct active or past_due subscriptions at month end. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: trialing_subscription_count
+        label: Trialing subscriptions
+        agg: count_distinct
+        expr: case when is_trialing then subscription_id end
+        description: Distinct subscriptions in a free trial at month end. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_seats_total
+        label: Paying seats
+        agg: sum
+        expr: paying_seats
+        description: >
+          Contracted seats on active and past_due subscriptions at month end.
+          Trial and canceled seats are excluded. Non-additive over time.
+        non_additive_dimension:
+          name: month_end
+          window_choice: max

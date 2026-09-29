@@ -1,0 +1,403 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: One row per customer account from dim_accounts. Includes every account ever created, including Relay internal test accounts and soft-deleted accounts; finance and sales metrics filter those out. Excludes no accounts.
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        type: primary
+        description: Unique account key. Includes all accounts; excludes nothing.
+        expr: account_id
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Customer display name. Includes the raw name for every account; excludes nothing.
+      - name: created_date
+        type: time
+        description: Date the account record was created. Includes all accounts; excludes nothing.
+        type_params:
+          time_granularity: day
+      - name: country
+        type: categorical
+        description: Two-letter billing country of the account. Includes every account; excludes nothing.
+      - name: region
+        type: categorical
+        description: Commercial region of the account (NA, EMEA, APAC, LATAM). Includes every account; excludes nothing.
+      - name: segment
+        type: categorical
+        description: Customer size segment (SMB, MidMarket, Enterprise). Includes every account; excludes nothing.
+      - name: billing_currency
+        type: categorical
+        description: Currency the account is billed in (USD, EUR, GBP, JPY). Includes every account; excludes nothing.
+      - name: is_internal
+        type: categorical
+        description: True for Relay internal and QA test accounts. Includes all accounts flagged internal; metrics exclude them.
+      - name: is_deleted
+        type: categorical
+        description: True for soft-deleted accounts. Includes all accounts with a deletion timestamp; metrics exclude them.
+      - name: parent_account_id
+        type: categorical
+        description: Owning parent account for subsidiaries, null for standalone accounts. Includes the raw parent link; excludes nothing.
+
+  - name: plans
+    description: One row per subscription plan from dim_plans. Includes all seven plans across the Starter, Growth, Scale and Enterprise families; excludes nothing.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        description: Unique plan key. Includes all plans; excludes nothing.
+        expr: plan_id
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Customer-facing plan name. Includes all plans; excludes nothing.
+      - name: plan_family
+        type: categorical
+        description: Plan family grouping monthly and annual variants (Starter, Growth, Scale, Enterprise). Includes all plans; excludes nothing.
+      - name: billing_interval
+        type: categorical
+        description: Billing cadence of the plan, month or year. Includes all plans; excludes nothing.
+
+  - name: sales_reps
+    description: One row per sales representative from dim_sales_reps. Includes every rep on every regional team; excludes nothing.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        description: Unique sales representative key. Includes all reps; excludes nothing.
+        expr: rep_id
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Sales representative name. Includes all reps; excludes nothing.
+      - name: sales_team
+        type: categorical
+        description: Regional sales team the rep belongs to (for example NA Sales). Includes all reps; excludes nothing.
+        expr: team
+      - name: sales_region
+        type: categorical
+        description: Region the rep sells into (NA, EMEA, APAC, LATAM). Includes all reps; excludes nothing.
+        expr: region
+      - name: hired_date
+        type: time
+        description: Date the rep was hired. Includes all reps; excludes nothing.
+        expr: hired_at
+        type_params:
+          time_granularity: day
+
+  - name: subscriptions
+    description: One row per subscription per calendar month-end from subscription_mrr_monthly, covering 2023-01 through 2025-06. Includes every subscription version state (active, past_due, trialing, canceled) for every account; MRR and customer metrics count only active and past_due rows of non-internal, non-deleted accounts. Excludes months outside 2023-01 to 2025-06.
+    model: ref('subscription_mrr_monthly')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        description: Unique key for one subscription in one month. Includes every row; excludes nothing.
+        expr: concat(subscription_id, '_', month_end)
+      - name: subscription
+        type: foreign
+        description: Subscription identifier, repeated once per month the subscription covers. Includes all subscriptions; excludes nothing.
+        expr: subscription_id
+      - name: account
+        type: foreign
+        description: Owning account of the subscription. Includes all accounts; excludes nothing.
+        expr: account_id
+      - name: plan
+        type: foreign
+        description: Plan in force for the subscription that month. Includes all plans; excludes nothing.
+        expr: plan_id
+    dimensions:
+      - name: month_end
+        type: time
+        description: Last calendar day of the snapshot month. Includes month-ends from 2023-01-31 to 2025-06-30; excludes all other dates.
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+        description: Subscription version status at month-end (active, past_due, trialing, canceled). Includes all four statuses; MRR counts only active and past_due.
+      - name: billing_interval
+        type: categorical
+        description: Plan billing cadence in force that month, month or year. Annual prices are divided by 12 for MRR. Includes both intervals; excludes nothing.
+      - name: currency
+        type: categorical
+        description: Subscription billing currency. Includes USD, EUR, GBP and JPY; excludes nothing.
+      - name: plan_id
+        type: categorical
+        description: Plan identifier in force that month. Includes all plans; excludes nothing.
+    measures:
+      - name: mrr_usd
+        description: Sum of monthly recurring revenue in USD at month-end. Includes contracted seat value after discounts for active and past_due subscriptions, with annual prices divided by 12 and converted at the month-end FX rate; excludes trialing and canceled rows (valued at 0), tax, usage charges, services and one-time fees. Internal and deleted accounts are included here and removed by metric filters.
+        agg: sum
+        expr: mrr_usd
+        create_metric: false
+      - name: paying_accounts
+        description: Count of account-month rows flagged as paying, each paying account counted once per month. Includes accounts with any active or past_due subscription that month; excludes accounts with only trialing or canceled subscriptions. Internal and deleted accounts are included here and removed by metric filters.
+        agg: sum
+        expr: paying_account_flag
+        create_metric: false
+      - name: new_customer_accounts
+        description: Count of accounts in their first-ever paying month, each counted once. Includes only the earliest month an account has an active or past_due subscription; excludes later months, trial-only months and reactivations. Internal and deleted accounts are included here and removed by metric filters.
+        agg: sum
+        expr: new_customer_flag
+        create_metric: false
+      - name: churned_customer_accounts
+        description: Count of accounts paying last month but not this month, each counted once. Includes only accounts with an active or past_due subscription in the prior month and none in the current month; excludes never-paying accounts, trial expirations without conversion and still-paying accounts. Internal and deleted accounts are included here and removed by metric filters.
+        agg: sum
+        expr: churned_customer_flag
+        create_metric: false
+      - name: prior_month_paying_accounts
+        description: Count of accounts that were paying in the prior month, each counted once. Includes accounts with any active or past_due subscription last month whether or not they still pay; excludes accounts that were not paying last month. Internal and deleted accounts are included here and removed by metric filters.
+        agg: sum
+        expr: prev_month_paying_flag
+        create_metric: false
+
+  - name: invoices
+    description: One row per issued invoice from fct_invoices. Includes subscription and services invoices in every status (paid, open, uncollectible, void, draft); billings metrics count only valid issued invoices. Excludes nothing at the row level.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        description: Unique invoice key. Includes all invoices; excludes nothing.
+        expr: invoice_id
+      - name: account
+        type: foreign
+        description: Billed account. Includes all accounts; excludes nothing.
+        expr: account_id
+      - name: subscription
+        type: foreign
+        description: Subscription billed by subscription invoices; null for services invoices. Includes linked subscriptions; excludes nothing.
+        expr: subscription_id
+    dimensions:
+      - name: issued_date
+        type: time
+        description: Date the invoice was issued. Includes all invoices; excludes nothing.
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        type: categorical
+        description: Invoice kind, subscription for recurring seat charges or services for one-time professional services. Includes both kinds; excludes nothing.
+      - name: status
+        type: categorical
+        description: Invoice lifecycle status (paid, open, uncollectible, void, draft). Includes all statuses; billings counts only paid, open and uncollectible.
+      - name: currency
+        type: categorical
+        description: Invoice currency. Includes USD, EUR, GBP and JPY; excludes nothing.
+    measures:
+      - name: billed_amount_usd
+        description: Sum of invoice line value excluding tax in USD at the issue-date FX rate. Includes subtotal minus discounts across all invoices; excludes tax. Every status and account is included here; metrics filter to valid invoices of real customers.
+        agg: sum
+        expr: (subtotal_minor - discount_minor) / power(10, minor_unit_exponent) * usd_per_unit
+        create_metric: false
+      - name: invoiced_tax_usd
+        description: Sum of invoice tax in USD at the issue-date FX rate. Includes tax on all invoices; excludes the pre-tax line value. Every status and account is included here.
+        agg: sum
+        expr: tax_minor / power(10, minor_unit_exponent) * usd_per_unit
+        create_metric: false
+      - name: invoice_count
+        description: Count of invoices. Includes every invoice row in every status; excludes nothing.
+        agg: count
+        expr: invoice_id
+        create_metric: false
+
+  - name: revenue_recognition
+    description: One row per invoice per month in which value is recognized, from fct_revenue_recognition. Subscription invoices are spread daily across their service period and services invoices are recognized in full at issuance. Includes rows for invoices in every status; recognized revenue metrics count only valid invoices. Excludes nothing at the row level.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: invoice_revenue_month
+        type: primary
+        description: Unique key for one invoice in one recognition month. Includes every row; excludes nothing.
+        expr: concat(invoice_id, '_', recognized_month)
+      - name: invoice
+        type: foreign
+        description: Source invoice of the recognized value. Includes all invoices; excludes nothing.
+        expr: invoice_id
+      - name: account
+        type: foreign
+        description: Customer account the revenue belongs to. Includes all accounts; excludes nothing.
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        description: First day of the month the value is recognized in. Includes every month with recognized value; excludes months with none.
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        type: categorical
+        description: Invoice kind, subscription for spread recurring value or services for value recognized at issuance. Includes both kinds; excludes nothing.
+      - name: status
+        type: categorical
+        description: Status of the source invoice (paid, open, uncollectible, void, draft). Includes all statuses; recognized revenue counts only paid, open and uncollectible.
+      - name: currency
+        type: categorical
+        description: Invoice currency. Includes USD, EUR, GBP and JPY; excludes nothing.
+    measures:
+      - name: recognized_amount_usd
+        description: Sum of recognized pre-tax value in USD at the invoice FX rate. Includes the earned portion of every invoice row; excludes tax and unearned future periods. Every status and account is included here; metrics filter to valid invoices of real customers.
+        agg: sum
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        create_metric: false
+
+  - name: payments
+    description: One row per payment attempt from fct_payments. Includes succeeded and failed attempts across card, ACH and wire; cash collected counts only succeeded payments. Excludes nothing at the row level.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        description: Unique payment key. Includes all payment attempts; excludes nothing.
+        expr: payment_id
+      - name: invoice
+        type: foreign
+        description: Invoice the payment was made against. Includes all linked invoices; excludes nothing.
+        expr: invoice_id
+      - name: account
+        type: foreign
+        description: Paying account. Includes all accounts; excludes nothing.
+        expr: account_id
+    dimensions:
+      - name: received_date
+        type: time
+        description: Date the payment was received. Includes all payment attempts; excludes nothing.
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+        description: Payment outcome, succeeded or failed. Includes both outcomes; cash collected counts only succeeded.
+      - name: method
+        type: categorical
+        description: Payment method (card, ach, wire). Includes all methods; excludes nothing.
+      - name: currency
+        type: categorical
+        description: Payment currency. Includes USD, EUR, GBP and JPY; excludes nothing.
+    measures:
+      - name: payment_amount_usd
+        description: Sum of payment amounts in USD at the receipt-date FX rate, including tax collected. Includes all payment attempts; excludes nothing here. Metrics filter to succeeded payments of real customers; failed attempts moved no cash.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        create_metric: false
+      - name: payment_count
+        description: Count of payment attempts. Includes succeeded and failed attempts; excludes nothing.
+        agg: count
+        expr: payment_id
+        create_metric: false
+
+  - name: credit_notes
+    description: One row per credit note issued against an invoice, from fct_credit_notes. Credit notes are the only record of money returned or credited to customers. Includes all four reasons (service_credit, goodwill, billing_error, downgrade_adjustment); excludes nothing.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        description: Unique credit note key. Includes all credit notes; excludes nothing.
+        expr: credit_note_id
+      - name: invoice
+        type: foreign
+        description: Invoice the credit was issued against. Includes all linked invoices; excludes nothing.
+        expr: invoice_id
+      - name: account
+        type: foreign
+        description: Credited account. Includes all accounts; excludes nothing.
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        description: Date the credit note was issued. Includes all credit notes; excludes nothing.
+        type_params:
+          time_granularity: day
+      - name: reason
+        type: categorical
+        description: Credit reason (service_credit, goodwill, billing_error, downgrade_adjustment). Includes all reasons; excludes none.
+      - name: currency
+        type: categorical
+        description: Credit note currency. Includes USD, EUR, GBP and JPY; excludes nothing.
+    measures:
+      - name: credit_amount_usd
+        description: Sum of credit note amounts in USD at the issue-date FX rate. Includes all credit notes for all accounts; excludes nothing here. Metrics filter to real customers.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        create_metric: false
+
+  - name: usage
+    description: One row per account per day per event type from fct_usage_daily. Includes billable api_call events and non-billable health_check monitoring noise; billable usage counts only api_call events. Excludes nothing at the row level.
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: account_usage_day
+        type: primary
+        description: Unique key for one account, day and event type. Includes every row; excludes nothing.
+        expr: concat(account_id, '_', usage_date, '_', event_type)
+      - name: account
+        type: foreign
+        description: Account that generated the usage. Includes all accounts; excludes nothing.
+        expr: account_id
+    dimensions:
+      - name: usage_date
+        type: time
+        description: Date the usage occurred. Includes every day with recorded usage; excludes days with none.
+        type_params:
+          time_granularity: day
+      - name: event_type
+        type: categorical
+        description: Usage event kind, api_call for billable product use or health_check for constant internal monitoring pings. Includes both kinds; billable usage counts only api_call.
+    measures:
+      - name: usage_quantity
+        description: Sum of usage event quantities. Includes both api_call and health_check events for all accounts; excludes nothing here. Metrics filter to billable api_call events of real customers.
+        agg: sum
+        expr: quantity
+        create_metric: false
+
+  - name: opportunities
+    description: One row per sales opportunity from fct_opportunities. Includes new-business and expansion opportunities in open, closed_won and closed_lost stages; bookings and win rate count only closed opportunities. Excludes nothing at the row level.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        description: Unique opportunity key. Includes all opportunities; excludes nothing.
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        description: Prospect or customer account. Includes all accounts; excludes nothing.
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        description: Owning sales representative. Includes all reps; excludes nothing.
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        type: time
+        description: Date the opportunity closed, or the expected close date for open pipeline. Includes all opportunities; bookings metrics use only closed_won rows.
+        type_params:
+          time_granularity: day
+      - name: created_date
+        type: time
+        description: Date the opportunity was created. Includes all opportunities; excludes nothing.
+        type_params:
+          time_granularity: day
+      - name: opportunity_type
+        type: categorical
+        description: Opportunity kind, new for new business or expansion for upsell to an existing customer. Includes both kinds; excludes nothing.
+      - name: stage
+        type: categorical
+        description: Sales stage (open, closed_won, closed_lost). Includes all stages; bookings counts only closed_won and win rate only closed stages.
+    measures:
+      - name: opportunity_amount_usd
+        description: Sum of opportunity amounts in USD. Includes all opportunities in every stage and type; excludes nothing here. Metrics filter to closed_won deals of real customers.
+        agg: sum
+        expr: amount_usd
+        create_metric: false
+      - name: opportunity_count
+        description: Count of opportunities. Includes every opportunity in every stage; excludes nothing.
+        agg: count
+        expr: opportunity_id
+        create_metric: false

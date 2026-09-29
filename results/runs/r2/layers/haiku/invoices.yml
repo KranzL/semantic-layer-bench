@@ -1,0 +1,52 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: Billing invoices issued to accounts.
+    defaults:
+      agg_time_dimension: issued_date
+    model: ref('fct_invoices')
+    entities:
+      - name: invoice
+        type: primary
+        role: identifier
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    measures:
+      - name: invoice_count
+        agg: count_distinct
+        expr: invoice_id
+        description: Count of invoices
+      - name: billing_usd
+        agg: sum
+        expr: "(subtotal_minor - discount_minor) / power(10, minor_unit_exponent) * usd_per_unit"
+        description: Billing amount in USD
+      - name: billing_minor
+        agg: sum
+        expr: "subtotal_minor - discount_minor"
+        description: Billing in minor units
+      - name: total_usd
+        agg: sum
+        expr: "total_minor / power(10, minor_unit_exponent) * usd_per_unit"
+        description: Total in USD
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: issued_date
+        description: Invoice issue date
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: Type of invoice
+      - name: status
+        type: categorical
+        expr: status
+        description: Invoice status
+      - name: currency
+        type: categorical
+        expr: currency
+        description: Currency

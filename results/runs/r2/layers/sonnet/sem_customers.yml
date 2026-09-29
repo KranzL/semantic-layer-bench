@@ -1,0 +1,137 @@
+version: 2
+
+semantic_models:
+  - name: sem_account_months
+    description: >
+      One row per non-internal account per calendar month end (int_account_months), with
+      every account represented in every month regardless of whether it had any
+      subscription activity, so month-over-month paying-status comparisons are correct.
+      Used for paying-customer, new-logo and logo-churn metrics.
+    model: ref('int_account_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account_id
+        type: primary
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: >
+          Last calendar day of the month. Data covers 2023-01-31 through 2025-06-30.
+      - name: is_paying
+        type: categorical
+        description: >
+          True if the account had at least one subscription with status "active" or
+          "past_due" effective at month_end (the same paying definition used for MRR).
+      - name: was_paying_prior_month
+        type: categorical
+        description: >
+          is_paying value for the same account as of the previous calendar month end.
+          Null for the first month in the dataset (2023-01-31), which has no prior month
+          to compare against.
+      - name: is_new_logo
+        type: categorical
+        description: >
+          True if the account is paying this month end (is_paying) and was not paying at
+          the prior month end. Null for the first month in the dataset, since there is no
+          prior month to compare against, so it is never counted as a new logo.
+      - name: is_churned_logo
+        type: categorical
+        description: >
+          True if the account was paying at the prior month end but is not paying this
+          month end. Null for the first month in the dataset for the same reason as
+          is_new_logo.
+    measures:
+      - name: paying_customers
+        description: >
+          Count of distinct non-internal accounts that are paying (active or past_due
+          subscription) as of the month end.
+        agg: count_distinct
+        expr: case when is_paying then account_id end
+      - name: starting_customers
+        description: >
+          Count of distinct non-internal accounts that were paying as of the prior month
+          end. Used as the denominator for logo churn rate (i.e. churn as a percentage of
+          the customer base at the start of the period). Always 0 for the first month in
+          the dataset.
+        agg: count_distinct
+        expr: case when was_paying_prior_month then account_id end
+      - name: new_logo_count
+        description: >
+          Count of distinct non-internal accounts that became paying customers this month
+          (paying now, not paying the prior month end).
+        agg: count_distinct
+        expr: case when is_new_logo then account_id end
+      - name: churned_logo_count
+        description: >
+          Count of distinct non-internal accounts that stopped being paying customers this
+          month (paying the prior month end, not paying now). This is a count of logos
+          lost, not a dollar amount.
+        agg: count_distinct
+        expr: case when is_churned_logo then account_id end
+
+metrics:
+  - name: customers
+    description: >
+      Paying customers: count of distinct non-internal accounts with at least one
+      subscription in "active" or "past_due" status as of the selected month end.
+      Excludes accounts that are only trialing, fully canceled, or Relay's internal/test
+      accounts. Slice by month_end (metric_time) and, via joined dimensions, by segment,
+      region and billing_currency.
+    type: simple
+    type_params:
+      measure: paying_customers
+
+  - name: customers_at_period_start
+    description: >
+      Paying customers as of the prior month end, i.e. the customer base at the start of
+      the current period. Exists to compute churn_rate; rarely queried directly.
+    type: simple
+    type_params:
+      measure: starting_customers
+
+  - name: new_customers
+    description: >
+      New logos: count of distinct non-internal accounts that had no active or past_due
+      subscription at the prior month end but do at the current month end. Counts a
+      returning customer who re-subscribes after fully churning as new again. Excludes
+      the first month in the dataset (2023-01-31), which has no prior month to compare
+      against and so reports zero new customers by construction rather than double
+      counting everyone present at data start.
+    type: simple
+    type_params:
+      measure: new_logo_count
+
+  - name: logo_churn
+    description: >
+      Logo churn: count of distinct non-internal accounts that had an active or past_due
+      subscription at the prior month end but do not at the current month end. This is a
+      count of customers lost, not a dollar (revenue) churn figure. Excludes the first
+      month in the dataset for the same reason as new_customers.
+    type: simple
+    type_params:
+      measure: churned_logo_count
+
+  - name: churn_rate
+    description: >
+      Logo churn rate: logo_churn divided by the number of paying customers at the start
+      of the period (customers_at_period_start), expressed as a fraction (e.g. 0.03 =
+      3% of customers churned this month). Undefined (denominator zero) for the first
+      month in the dataset.
+    type: ratio
+    type_params:
+      numerator: logo_churn
+      denominator: customers_at_period_start
+
+  - name: arpa
+    description: >
+      Average Revenue Per Account: MRR divided by the number of paying customers in the
+      same month, in USD. Combines the mrr metric (active/past-due subscription seats
+      only, no trials, no canceled subscriptions, no services revenue) with the customers
+      metric (active/past-due accounts). Both exclude Relay's internal/test accounts.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: customers

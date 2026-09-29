@@ -1,0 +1,123 @@
+version: 2
+
+semantic_models:
+  - name: sem_opportunities
+    description: >
+      One row per sales opportunity (deal) worked by a rep, whether it is still open or
+      has closed won/lost. Covers both new-business and expansion (upsell/cross-sell into
+      an existing account) deals. Grain: one row per opportunity_id.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: created_date
+        description: "The date the opportunity was created/opened. Not used to recognize bookings -- bookings are recognized on close_date."
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: close_date
+        description: "The date the opportunity closed (won or lost) or is forecast/scheduled to close while still open. Bookings, new_bookings and win_rate are all recognized on this date."
+      - name: opportunity_type
+        type: categorical
+        expr: opportunity_type
+        description: "'new' for net-new business from a new customer, or 'expansion' for upsell/cross-sell into an existing account. new_bookings includes only 'new'; bookings includes both."
+      - name: opportunity_stage
+        type: categorical
+        expr: stage
+        description: "The deal's current stage: 'open' (still being worked, no outcome yet), 'closed_won' (deal signed), or 'closed_lost' (deal lost/abandoned). Bookings metrics include only closed_won; win_rate compares closed_won against closed_won + closed_lost and excludes still-open deals from both sides of the ratio."
+    measures:
+      - name: bookings_amount_usd
+        expr: amount_usd
+        agg: sum
+        description: >
+          Raw, unfiltered opportunity amount in USD (opportunities are sourced and stored
+          in USD already, with no further currency conversion needed). Includes open and
+          closed_lost deals at their opportunity amount, not just closed_won; the bookings
+          and new_bookings metrics apply the closed_won filter on top of this measure.
+      - name: opportunity_count
+        expr: opportunity_id
+        agg: count_distinct
+        description: >
+          Distinct count of opportunities. Unfiltered, this counts deals in any stage; the
+          won_opportunities and decided_opportunities metrics filter this by stage to power
+          win_rate.
+
+metrics:
+  - name: bookings
+    label: Bookings
+    description: >
+      Total contract value of opportunities that closed won in the period, in USD,
+      including both new-business and expansion deals. Recognized on the opportunity's
+      close_date. Excludes still-open opportunities and closed_lost opportunities
+      entirely -- an opportunity only contributes once it is actually won.
+    type: simple
+    type_params:
+      measure: bookings_amount_usd
+    filter: |
+      {{ Dimension('opportunity__opportunity_stage') }} = 'closed_won'
+
+  - name: new_bookings
+    label: New Bookings
+    description: >
+      Total contract value of net-new-business opportunities (opportunity_type = 'new')
+      that closed won in the period, in USD. Excludes expansion/upsell deals entirely
+      (those are part of bookings but not new_bookings), and excludes still-open and
+      closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: bookings_amount_usd
+    filter: |
+      {{ Dimension('opportunity__opportunity_stage') }} = 'closed_won'
+      and {{ Dimension('opportunity__opportunity_type') }} = 'new'
+
+  - name: won_opportunities
+    label: Won Opportunities
+    description: >
+      Count of opportunities that closed won in the period. Used as the numerator for
+      win_rate; excludes open and closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__opportunity_stage') }} = 'closed_won'
+
+  - name: decided_opportunities
+    label: Decided Opportunities
+    description: >
+      Count of opportunities that have reached a final outcome in the period -- closed
+      won or closed lost. Excludes still-open opportunities (a deal with no outcome yet
+      cannot count toward win rate in either direction). Used as the denominator for
+      win_rate.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__opportunity_stage') }} in ('closed_won', 'closed_lost')
+
+  - name: win_rate
+    label: Win Rate
+    description: >
+      Share of decided opportunities (closed won or closed lost) that were won:
+      won_opportunities / decided_opportunities, closed in the period. Excludes
+      still-open opportunities from both the numerator and denominator -- an open pipeline
+      of deals does not lower the win rate until those deals actually close. A win rate of
+      0.4 means 40% of the deals that closed in the period were won.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: decided_opportunities

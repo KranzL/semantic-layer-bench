@@ -1,0 +1,156 @@
+version: 2
+
+# Customer lifecycle flows (new, churned, reactivated) and the MRR bridge.
+# Customers are logos: child accounts are rolled into their parent. These
+# metrics are flows and add up correctly across months, quarters and years.
+
+metrics:
+  - name: new_customers
+    label: New customers
+    description: >
+      Customers (logos) whose first-ever month with MRR is the reporting month,
+      i.e. the month their first subscription became active (typically at the end
+      of a free trial). Counted once per customer, ever; a customer that returns
+      after cancelling is a reactivation, not new. Excludes trials that never
+      converted and internal accounts.
+    type: simple
+    type_params:
+      measure:
+        name: new_customer_count
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Customers (logos) that had MRR at the previous month end and none at this
+      month end because every subscription was canceled. Counted in the first
+      month without MRR. Downgrades and seat reductions are contraction, not
+      churn; trials that never paid are not churn. Excludes internal accounts.
+    type: simple
+    type_params:
+      measure:
+        name: churned_customer_count
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: Customers (logos) that regained MRR this month after one or more months with none. Excludes a customer's first-ever paying month.
+    type: simple
+    type_params:
+      measure:
+        name: reactivated_customer_count
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Churned customers in the month divided by paying customers at the previous
+      month end. Expressed as a fraction (0.02 = 2 percent). Customers are logos;
+      excludes trials and internal accounts. Query at month granularity; at
+      coarser grains the denominator is the paying-customer count one month before
+      the period's last month, so prefer monthly.
+    type: derived
+    type_params:
+      expr: churned_customers / nullif(paying_customers_prior_month, 0)
+      metrics:
+        - name: churned_customers
+        - name: paying_customers
+          offset_window: 1 month
+          alias: paying_customers_prior_month
+
+  - name: new_mrr
+    label: New MRR
+    description: USD MRR added by customers in their first paying month. Excludes internal accounts.
+    type: simple
+    type_params:
+      measure:
+        name: new_mrr_usd
+  - name: expansion_mrr
+    label: Expansion MRR
+    description: >
+      USD MRR gained from retained customers whose MRR increased versus the
+      previous month (more seats, higher plan, smaller discount), measured at
+      the current month's FX rate so currency moves are not counted.
+    type: simple
+    type_params:
+      measure:
+        name: expansion_mrr_usd
+  - name: contraction_mrr
+    label: Contraction MRR
+    description: >
+      USD MRR lost from retained customers whose MRR decreased versus the
+      previous month (fewer seats, lower plan, bigger discount), at constant FX.
+      Positive number.
+    type: simple
+    type_params:
+      measure:
+        name: contraction_mrr_usd
+  - name: churned_mrr
+    label: Churned MRR
+    description: Previous-month USD MRR (at the current month's FX rate) of customers who churned this month. Positive number.
+    type: simple
+    type_params:
+      measure:
+        name: churned_mrr_usd
+  - name: reactivation_mrr
+    label: Reactivation MRR
+    description: USD MRR of customers who returned this month after a gap without MRR.
+    type: simple
+    type_params:
+      measure:
+        name: reactivation_mrr_usd
+  - name: fx_impact_on_mrr
+    label: FX impact on MRR
+    description: >
+      Month-over-month change in MRR that is due only to FX rate movement on
+      non-USD subscriptions. Positive when the dollar weakened. new_mrr +
+      expansion_mrr + reactivation_mrr - contraction_mrr - churned_mrr +
+      fx_impact_on_mrr equals the change in mrr exactly.
+    type: simple
+    type_params:
+      measure:
+        name: fx_impact_mrr_usd
+  - name: net_new_mrr
+    label: Net new MRR
+    description: >
+      new_mrr + expansion_mrr + reactivation_mrr - contraction_mrr - churned_mrr,
+      in USD at constant FX. Equals the month-over-month change in mrr excluding
+      FX impact.
+    type: derived
+    type_params:
+      expr: new_mrr + expansion_mrr + reactivation_mrr - contraction_mrr - churned_mrr
+      metrics:
+        - name: new_mrr
+        - name: expansion_mrr
+        - name: reactivation_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+
+  - name: gross_mrr_churn_rate
+    label: Gross MRR churn rate
+    description: >
+      (churned_mrr + contraction_mrr) divided by MRR at the previous month end,
+      as a fraction. Measures revenue lost from existing customers before any
+      expansion. Query at month granularity.
+    type: derived
+    type_params:
+      expr: (churned_mrr + contraction_mrr) / nullif(mrr_prior_month, 0)
+      metrics:
+        - name: churned_mrr
+        - name: contraction_mrr
+        - name: mrr
+          offset_window: 1 month
+          alias: mrr_prior_month
+
+  - name: net_mrr_retention_rate
+    label: Net MRR retention rate
+    description: >
+      (previous-month MRR + expansion_mrr + reactivation_mrr - contraction_mrr -
+      churned_mrr) divided by previous-month MRR, as a fraction (1.02 = 102
+      percent). Uses constant FX so currency moves are excluded. Above 1 means
+      existing customers grew net of churn. Query at month granularity.
+    type: derived
+    type_params:
+      expr: (mrr_prior_month + expansion_mrr + reactivation_mrr - contraction_mrr - churned_mrr) / nullif(mrr_prior_month, 0)
+      metrics:
+        - name: expansion_mrr
+        - name: reactivation_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+        - name: mrr
+          offset_window: 1 month
+          alias: mrr_prior_month

@@ -1,0 +1,210 @@
+version: 2
+
+semantic_models:
+  # ---------------------------------------------------------------------------
+  - name: accounts
+    label: Accounts
+    description: >
+      Billing accounts as they appear in the CRM (marts.dim_accounts), one row per
+      account. Includes internal test accounts (is_internal = true), soft-deleted
+      accounts (is_deleted = true) and child accounts that bill separately under an
+      Enterprise parent. Join target for every fact via the account entity; use it
+      to slice by the billing account's own segment, region, country or currency.
+      To count or slice by logo (parent-level customer) use the customers model.
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: The billing account. Primary key of dim_accounts.
+      - name: customer
+        type: foreign
+        expr: coalesce(parent_account_id, account_id)
+        description: >
+          The customer (logo) this account belongs to: its parent account if it has
+          one, otherwise itself. Joins to the customers model.
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Display name of the billing account.
+      - name: segment
+        type: categorical
+        description: >
+          Sales segment of the billing account itself: SMB, MidMarket or Enterprise.
+          Child accounts carry their own segment, which can differ from the parent's.
+      - name: region
+        type: categorical
+        description: "Sales region of the billing account: NA, EMEA, APAC or LATAM."
+      - name: country
+        type: categorical
+        description: ISO-style country of the billing account.
+      - name: billing_currency
+        type: categorical
+        description: Currency the account is invoiced in (USD, EUR, GBP or JPY).
+      - name: is_internal
+        type: categorical
+        description: >
+          True for Relay's own demo, QA, sandbox and internal accounts. Every fact
+          helper in the semantic layer already excludes these accounts; this flag
+          is only useful when browsing the account list.
+      - name: is_deleted
+        type: categorical
+        description: >
+          True when the CRM record has a deleted_at timestamp. Deleted accounts keep
+          invoicing and paying after deletion, so they are NOT excluded from any
+          metric; deletion is a CRM housekeeping flag, not churn.
+      - name: is_child_account
+        type: categorical
+        expr: parent_account_id is not null
+        description: True when the account bills under a parent account.
+      - name: account_created_date
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+        description: Date the account record was created in the CRM.
+
+  # ---------------------------------------------------------------------------
+  - name: customers
+    label: Customers (logos)
+    description: >
+      One row per customer, meaning a top-level account with no parent. Child
+      accounts are rolled into their parent, so a parent with three child accounts
+      is one customer. This is the grain finance uses for paying customers, new
+      customers, logo churn and ARPA. Internal accounts are present with
+      is_internal = true but have no activity in any fact model.
+    model: ref('sem_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+        description: The customer (top-level account) identifier; equals the parent account_id.
+    dimensions:
+      - name: customer_name
+        type: categorical
+        description: Display name of the top-level account.
+      - name: segment
+        type: categorical
+        description: >
+          Segment of the top-level account (SMB, MidMarket, Enterprise). Every
+          parent account with children is Enterprise, so child-account activity
+          rolls into Enterprise at this grain.
+      - name: region
+        type: categorical
+        description: Region of the top-level account (NA, EMEA, APAC, LATAM).
+      - name: country
+        type: categorical
+        description: Country of the top-level account.
+      - name: billing_currency
+        type: categorical
+        description: >
+          Invoice currency of the top-level account. Child accounts may bill in a
+          different currency; use the fact's own currency dimension for money split
+          by currency.
+      - name: is_internal
+        type: categorical
+        description: True for Relay's own test accounts; these have no activity in any fact model.
+      - name: is_deleted
+        type: categorical
+        description: True when the CRM record is soft-deleted; not treated as churn.
+      - name: has_child_accounts
+        type: categorical
+        description: True when one or more child accounts bill under this customer.
+      - name: customer_created_date
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+        description: Date the top-level account was created in the CRM.
+
+  # ---------------------------------------------------------------------------
+  - name: plans
+    label: Plans
+    description: >
+      Price plans (marts.dim_plans), one row per plan. plan_family is the product
+      tier (Starter, Growth, Scale, Enterprise) and billing_interval is month or
+      year. Joined to subscription, invoice, payment, refund and revenue facts via
+      the plan entity.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: Plan identifier, e.g. PLN-GROWTH-Y.
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Marketing name of the plan, e.g. "Growth Annual".
+      - name: plan_family
+        type: categorical
+        description: "Product tier regardless of billing interval: Starter, Growth, Scale or Enterprise."
+      - name: billing_interval
+        type: categorical
+        description: "How often the plan bills: month or year."
+      - name: list_price_usd
+        type: categorical
+        expr: list_price_usd_minor / 100.0
+        description: USD list price per seat per billing interval, before discounts and before local-currency pricing.
+
+  # ---------------------------------------------------------------------------
+  - name: sales_reps
+    label: Sales reps
+    description: >
+      Sales representatives (marts.dim_sales_reps), one row per rep. Each rep
+      belongs to one regional team (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      Joined to opportunities via the sales_rep entity.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: Sales rep identifier.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Full name of the sales rep.
+      - name: team
+        type: categorical
+        description: Sales team the rep belongs to, e.g. "EMEA Sales".
+      - name: region
+        type: categorical
+        description: Region the rep sells into (NA, EMEA, APAC, LATAM); matches the team.
+      - name: hired_at
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the rep was hired.
+
+  # ---------------------------------------------------------------------------
+  - name: fiscal_calendar
+    label: Fiscal calendar
+    description: >
+      Relay's fiscal calendar (marts.dim_date), one row per calendar day. The
+      fiscal year starts on 1 February and is named for the calendar year in which
+      it ends (FY2025 runs 2024-02-01 to 2025-01-31). Every fact model exposes a
+      calendar_date entity pointing at its own activity date (invoice issue date,
+      payment date, close date, month end, and so on), so any metric can be grouped
+      by calendar_date__fiscal_year or calendar_date__fiscal_quarter_label.
+    model: ref('dim_date')
+    entities:
+      - name: calendar_date
+        type: primary
+        expr: date_day
+        description: The calendar day. Facts join here on their activity date.
+    dimensions:
+      - name: fiscal_year
+        type: categorical
+        description: Fiscal year number; FY starts 1 February and is named for the year it ends in.
+      - name: fiscal_quarter
+        type: categorical
+        description: Fiscal quarter 1-4 within the fiscal year (Q1 = Feb-Apr).
+      - name: fiscal_month
+        type: categorical
+        description: Fiscal month 1-12 within the fiscal year (1 = February).
+      - name: fiscal_quarter_label
+        type: categorical
+        expr: "'FY' || cast(fiscal_year as varchar) || ' Q' || cast(fiscal_quarter as varchar)"
+        description: Human-readable fiscal quarter, e.g. "FY2025 Q3".
+      - name: calendar_year
+        type: categorical
+        description: Calendar (January-December) year of the day.

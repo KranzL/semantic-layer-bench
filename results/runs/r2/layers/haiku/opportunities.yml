@@ -1,0 +1,65 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: Sales pipeline opportunities.
+    defaults:
+      agg_time_dimension: created_date
+    model: ref('fct_opportunities')
+    entities:
+      - name: opportunity
+        type: primary
+        role: identifier
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+    measures:
+      - name: opportunity_count
+        agg: count_distinct
+        expr: opportunity_id
+        description: Count of distinct opportunities
+      - name: bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+        description: Sum of closed-won opportunity amounts in USD (bookings). Only includes opportunities that closed as won.
+      - name: new_bookings_usd
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then amount_usd else 0 end
+        description: Sum of closed-won new business opportunity amounts in USD. Excludes expansion and renewal bookings.
+      - name: closed_won_count
+        agg: count_distinct
+        expr: case when stage = 'closed_won' then opportunity_id else null end
+        description: Count of closed-won opportunities
+      - name: closed_won_count_new
+        agg: count_distinct
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then opportunity_id else null end
+        description: Count of closed-won new business opportunities
+      - name: total_closed_count
+        agg: count_distinct
+        expr: case when stage in ('closed_won', 'closed_lost') then opportunity_id else null end
+        description: Total count of closed opportunities (won or lost)
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: created_date
+        description: Date the opportunity was created
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: close_date
+        description: Date the opportunity was closed (won or lost)
+      - name: opportunity_type
+        type: categorical
+        expr: opportunity_type
+        description: Type of opportunity - new (new customer acquisition), expansion (upsell/add-on), or renewal
+      - name: stage
+        type: categorical
+        expr: stage
+        description: Opportunity stage - open, closed_won, or closed_lost

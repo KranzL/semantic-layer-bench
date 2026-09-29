@@ -1,0 +1,9 @@
+relay:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('RELAY_DUCKDB_PATH', '../data/warehouse.duckdb') }}"
+      threads: 4
+      settings:
+        enable_external_access: false

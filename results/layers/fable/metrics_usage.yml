@@ -1,0 +1,30 @@
+version: 2
+
+metrics:
+  - name: billable_usage
+    label: Billable usage (API calls)
+    description: >
+      Count of api_call events in the period, dated by usage day. Excludes health_check events (automated
+      platform pings, 288 per account per day) and all usage from internal QA/demo/sandbox accounts and
+      soft-deleted accounts. Includes usage by accounts in trial.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+
+  - name: total_usage
+    label: Total usage events
+    description: >
+      Count of all usage events (api_call and health_check) in the period for reportable accounts. Excludes
+      internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: usage_quantity
+
+  - name: usage_active_accounts
+    label: Accounts with usage
+    description: >
+      Distinct billing accounts with any usage event in the period (health checks included, so this is
+      accounts connected to the platform, not necessarily paying). Excludes internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: active_usage_accounts

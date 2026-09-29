@@ -1,0 +1,132 @@
+semantic_models:
+  - name: sem_subscription_recurring_revenue
+    description: >
+      One row per subscription per month-end (the last calendar day of each
+      month from 2023-01 through 2025-06, the range covered by observed
+      billing activity). Each row is a point-in-time snapshot of the
+      subscription's seats, plan and price as of that month-end, built from
+      the subscription_versions history. Deduplicated so there is exactly
+      one row per subscription per month-end even where the source contains
+      overlapping version records. Internal/test accounts (is_internal) are
+      excluded entirely. This is the base for MRR, ARR, paying-customer and
+      ARPA metrics.
+    model: ref('int_subscription_month_snapshot')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month_id
+        type: primary
+      - name: subscription_id
+        type: foreign
+      - name: account_id
+        type: foreign
+      - name: plan_id
+        type: foreign
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: The last calendar day of the snapshotted month.
+      - name: status
+        type: categorical
+        description: "The subscription's status as of the month-end: trialing (in trial, not yet billed), active (billing normally), past_due (billing but the most recent payment attempt failed) or canceled (no longer billing)."
+      - name: is_paying
+        type: categorical
+        description: "True when status is active or past_due, i.e. the subscription is currently expected to generate recurring revenue. False for trialing (not yet a paying subscription) and canceled (no longer one)."
+      - name: plan_name
+        type: categorical
+        description: "The specific plan the subscription is on, e.g. \"Growth\" or \"Growth Annual\"."
+      - name: plan_family
+        type: categorical
+        description: "The product tier of the subscription's plan, independent of billing interval: Starter, Growth, Scale or Enterprise."
+      - name: billing_interval
+        type: categorical
+        description: "Whether the subscription is invoiced month or year."
+      - name: currency
+        type: categorical
+        description: "The currency the subscription itself is billed in (USD, EUR, GBP or JPY). All dollar measures on this model are already converted to USD using the fx rate as of the month-end; this dimension is for slicing by original contract currency, not for re-deriving local-currency amounts."
+      - name: segment
+        type: categorical
+        description: "The owning account's size segment: SMB, MidMarket or Enterprise."
+      - name: region
+        type: categorical
+        description: "The owning account's sales/reporting region: NA, EMEA, APAC or LATAM."
+      - name: country
+        type: categorical
+        description: "The owning account's billing country."
+    measures:
+      - name: subscription_mrr_usd
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Monthly-equivalent recurring seat revenue in USD for one
+          subscription as of one month-end: seats x seat price x (1 -
+          discount), converted to USD at the month-end fx rate, with annual
+          plans divided by 12 to put them on a monthly basis (annual list
+          prices are not simply 12x the monthly price, so this is not a
+          flat proration). This is computed for every subscription-month
+          regardless of status, so it includes a hypothetical amount for
+          trialing and canceled subscriptions that are not actually being
+          billed. Always used together with the is_paying filter (via the
+          mrr metric) to get real recurring revenue -- do not sum this
+          measure directly without that filter.
+      - name: paying_subscription_accounts
+        agg: count_distinct
+        expr: account_id
+        description: >
+          Distinct accounts with at least one subscription-month row.
+          Combined with the is_paying filter (via the paying_customers
+          metric) to count distinct paying accounts; not meaningful on its
+          own since it would also count trialing-only and fully-canceled
+          accounts.
+
+metrics:
+  - name: mrr
+    description: >
+      Monthly Recurring Revenue: the monthly-equivalent recurring seat
+      revenue, in USD, of all subscriptions that are active or past_due
+      as of a month-end. Excludes trialing subscriptions (not yet
+      paying), canceled subscriptions, one-time services invoices, usage
+      overages and Relay's internal/test accounts. past_due
+      subscriptions are included because the contractual commitment is
+      still in force even though the most recent payment attempt
+      failed; see cash_collected for actual cash received.
+    type: simple
+    type_params:
+      measure: subscription_mrr_usd
+    filter: |
+      {{ Dimension('subscription_month_id__is_paying') }} = true
+  - name: arr
+    description: >
+      Annual Recurring Revenue: mrr annualized (mrr x 12). Same scope
+      and exclusions as mrr; not a trailing-twelve-month bookings or
+      cash total, just the current monthly run rate scaled to a year.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+  - name: paying_customers
+    description: >
+      Count of distinct accounts with an active or past_due subscription
+      as of a month-end (i.e. currently paying, or currently owing
+      payment on an active contract). Excludes accounts that are only
+      trialing, fully canceled, or internal/test accounts. An account
+      with more than one concurrently paying subscription is still
+      counted once.
+    type: simple
+    type_params:
+      measure: paying_subscription_accounts
+    filter: |
+      {{ Dimension('subscription_month_id__is_paying') }} = true
+  - name: arpa
+    description: >
+      Average Revenue Per Account: mrr divided by paying_customers for
+      the same period and slice. Represents the average monthly
+      recurring revenue per paying customer; not applicable to
+      non-paying (trialing/canceled) accounts.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers

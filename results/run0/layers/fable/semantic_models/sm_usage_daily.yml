@@ -1,0 +1,73 @@
+version: 2
+
+semantic_models:
+  - name: usage_daily
+    label: Product usage (daily)
+    description: >
+      Daily metered usage per external account and event type (built from
+      marts.fct_usage_daily by sem_usage_daily). Two event types exist: api_call,
+      the customer-driven metered event, and health_check, a platform heartbeat
+      that fires exactly 288 times a day for every account and is never charged.
+      Each row carries the account's subscription status on that day.
+      Billable usage is api_call quantity on days when the account had an active
+      or past_due subscription. Usage during a free trial is recorded but not
+      billable. Internal accounts are excluded.
+    model: ref('sem_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: usage_day_id
+        description: Surrogate key account_id | usage_date | event_type.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account that generated the usage.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account).
+      - name: calendar_date
+        type: foreign
+        expr: usage_date
+        description: Usage date, for fiscal calendar attributes.
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Day the usage occurred.
+      - name: event_type
+        type: categorical
+        description: api_call (metered, billable when subscribed) or health_check (platform heartbeat, never billable).
+      - name: subscription_status_on_date
+        type: categorical
+        description: paying (active or past_due), trialing, canceled or no_subscription on the usage day.
+      - name: is_billable
+        type: categorical
+        description: True for api_call rows on days with an active or past_due subscription.
+    measures:
+      - name: billable_usage_quantity
+        label: Billable usage (API calls)
+        agg: sum
+        expr: billable_quantity
+        description: >
+          Count of api_call events on days when the account had an active or
+          past_due subscription. Excludes health checks, trial-period usage and
+          internal accounts.
+      - name: api_call_quantity
+        label: API calls (all)
+        agg: sum
+        expr: case when event_type = 'api_call' then quantity else 0 end
+        description: All api_call events of external accounts, including usage during free trials. Excludes health checks.
+      - name: health_check_quantity
+        label: Health checks
+        agg: sum
+        expr: case when event_type = 'health_check' then quantity else 0 end
+        description: Platform heartbeat events (288 per account per day). Never billable.
+      - name: accounts_with_billable_usage
+        label: Accounts with billable usage
+        agg: count_distinct
+        expr: case when is_billable and quantity > 0 then account_id end
+        description: Distinct accounts with at least one billable api_call in the period.

@@ -1,0 +1,73 @@
+version: 2
+
+semantic_models:
+  - name: sem_revenue_recognition
+    description: >
+      One row per invoice per calendar month in which some of that invoice's value is
+      recognized as revenue under a ratable, days-in-period schedule. Subscription
+      invoices are spread evenly across every calendar day in their service period
+      (period_start to period_end) and rolled up to the month(s) those days fall in;
+      services invoices recognize their full value in a single month, the invoice's issued
+      month. Carries the same invoice-level status as the source invoice (draft/open/paid/
+      uncollectible/void), unfiltered; the recognized_revenue metric filters this to
+      finalized invoices only. Grain: one row per (invoice_id, recognized_month).
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: invoice_month
+        type: primary
+        expr: "invoice_id || '-' || cast(recognized_month as varchar)"
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        expr: recognized_month
+        description: "The calendar month this slice of revenue is recognized in. For a multi-month subscription invoice this differs from the invoice's issued_date; for a services invoice it equals the issued month."
+      - name: revrec_invoice_type
+        type: categorical
+        expr: invoice_type
+        description: "'subscription' for recurring plan invoices recognized ratably over the service period, or 'services' for one-off charges recognized in full in the issued month."
+      - name: revrec_invoice_status
+        type: categorical
+        expr: status
+        description: "The current lifecycle status of the underlying invoice (draft/open/paid/uncollectible/void). The recognized_revenue metric includes open, paid and uncollectible and excludes draft and void, matching the billings metric's filter."
+      - name: revrec_currency
+        type: categorical
+        expr: currency
+        description: "The currency of the underlying invoice. The recognized-revenue measure is already converted to USD at the fx rate in effect for that invoice; this dimension shows the original billing currency."
+    measures:
+      - name: recognized_revenue_amount_usd
+        expr: recognized_amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        agg: sum
+        description: >
+          Raw, unfiltered recognized-revenue amount in USD for this invoice/month slice:
+          the pre-tax (subtotal minus discount) invoice value allocated to this month,
+          converted to whole currency units and to USD. Excludes tax by construction (tax
+          is never revenue). Includes draft and void invoices at face value; the
+          `recognized_revenue` metric applies the finalized-invoice filter on top of this
+          measure.
+
+metrics:
+  - name: recognized_revenue
+    label: Recognized Revenue
+    description: >
+      Revenue recognized in the period under a ratable, days-in-period schedule: pre-tax
+      (subtotal minus discount) value of finalized invoices (status open, paid, or
+      uncollectible), spread evenly across each subscription invoice's service period and
+      taken in full in the issued month for services invoices. Excludes tax (tax is never
+      company revenue), draft invoices (not finalized), and void invoices (canceled, never
+      owed). Does not depend on whether cash has actually been collected -- for that, see
+      cash_collected; for the invoiced amount including tax, see billings.
+    type: simple
+    type_params:
+      measure: recognized_revenue_amount_usd
+    filter: |
+      {{ Dimension('invoice_month__revrec_invoice_status') }} in ('open', 'paid', 'uncollectible')

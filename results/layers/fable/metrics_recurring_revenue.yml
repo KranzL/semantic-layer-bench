@@ -1,0 +1,71 @@
+version: 2
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD at month end. Sum over subscriptions with status active or past_due of
+      seats x per-seat price x (1 - discount), converted from the contract currency at the month-end FX rate,
+      with annual plans divided by 12. Excludes trials, canceled subscriptions, tax, one-off services,
+      usage and credit notes, and excludes internal and soft-deleted accounts. A snapshot: by quarter or year
+      it returns the last month end of the period. Slice by account__segment, account__region,
+      subscription_month__currency, plan__plan_family, subscription_month__billing_interval, etc.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD at month end, defined as MRR x 12 (the run rate, not the sum of
+      annual contract values). Same inclusions and exclusions as MRR. Snapshot: by quarter or year it
+      returns the last month end of the period.
+    type: simple
+    type_params:
+      measure: arr_usd
+
+  - name: mrr_contract_currency
+    label: MRR (contract currency)
+    description: >
+      MRR in the subscription's own currency, in major units (euros, pounds, yen, dollars), before FX
+      conversion. Only meaningful when grouped by subscription_month__currency; totals across currencies
+      are not comparable. Same inclusions and exclusions as MRR.
+    type: simple
+    type_params:
+      measure: mrr_local
+
+  - name: paid_seats
+    label: Paid seats
+    description: >
+      Seats on active or past_due subscriptions at month end. Excludes trial and canceled seats, internal
+      and soft-deleted accounts. Snapshot: by quarter or year it returns the last month end of the period.
+    type: simple
+    type_params:
+      measure: paid_seats
+
+  - name: paying_subscriptions
+    label: Paying subscriptions
+    description: >
+      Number of subscriptions with status active or past_due at month end (each contributes MRR). Excludes
+      trials, canceled subscriptions, internal and soft-deleted accounts. Snapshot at the last month end of
+      the period.
+    type: simple
+    type_params:
+      measure: paying_subscriptions
+
+  - name: trialing_subscriptions
+    label: Trialing subscriptions
+    description: >
+      Number of subscriptions in their 14-day free trial at month end (zero MRR). Excludes internal and
+      soft-deleted accounts. Snapshot at the last month end of the period.
+    type: simple
+    type_params:
+      measure: trialing_subscriptions
+
+  - name: average_mrr_per_seat
+    label: Average MRR per paid seat
+    description: MRR divided by paid seats at month end, in USD. Snapshot at the last month end of the period.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paid_seats

@@ -1,0 +1,190 @@
+version: 2
+
+# Recurring-revenue snapshot metrics: MRR, ARR, paying customers, ARPA, seats.
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      Month-end snapshot of every subscription, one row per subscription per month end from
+      2023-01-31 to 2025-06-30 (fct_subscription_months). Each row carries the subscription
+      version in force on the month-end date: status (trialing, active, past_due or canceled),
+      plan, seats, contracted unit price in the subscription currency, discount percentage and the
+      USD FX rate on that date. Includes internal accounts and every status, so every metric here
+      filters to status in (active, past_due) and account__is_internal = false. A canceled
+      subscription keeps an open-ended "canceled" version, so canceled rows exist for every later
+      month and must never be counted. Because the rows are snapshots, the measures are
+      non-additive over time: for any period the value is taken at the latest month end in the
+      period. Group these metrics by metric_time (month, quarter or year) for a time series;
+      grouping only by a non-time dimension (segment, plan, fiscal_year, ...) returns the latest
+      snapshot in the data (2025-06-30) broken down by that dimension.
+    model: ref('fct_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    primary_entity: subscription_month
+    entities:
+      - name: subscription
+        description: Subscription identifier (subscription_id). An account can have at most one active or past_due subscription per month.
+        type: foreign
+        expr: subscription_id
+      - name: account
+        description: Billing account that owns the subscription; joins to accounts for segment, region, country and is_internal.
+        type: foreign
+        expr: account_id
+      - name: plan
+        description: Plan of the subscription version in force at month end; joins to plans.
+        type: foreign
+        expr: plan_id
+      - name: calendar_date
+        description: The month-end snapshot date; joins to fiscal_calendar for fiscal year/quarter.
+        type: foreign
+        expr: month_end
+    dimensions:
+      - name: month_end
+        description: Snapshot date, always the last calendar day of a month (2023-01-31 to 2025-06-30).
+        type: time
+        type_params:
+          time_granularity: day
+      - name: subscription_status
+        description: >
+          Status of the subscription version in force at month end: trialing (free trial, not
+          paying), active (paying), past_due (paying but with an unpaid invoice; still counted as
+          a customer until canceled) or canceled (no longer a customer).
+        type: categorical
+        expr: status
+      - name: billing_interval
+        description: Billing interval of the plan in force, month or year. Annual amounts are divided by 12 for MRR.
+        type: categorical
+      - name: currency
+        description: Currency of the subscription's contracted price (USD, EUR, GBP or JPY). Measures are converted to USD.
+        type: categorical
+      - name: discount_pct
+        description: Contracted discount as a fraction of list price (0, 0.10, 0.15 or 0.20) applied to the version in force.
+        type: categorical
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue in USD of the subscription version in force at month end:
+          seats x contracted unit price x (1 - discount_pct), converted from minor units using the
+          currency's minor-unit exponent (JPY has 0 decimals) and the month-end USD FX rate, and
+          divided by 12 for annual plans. Excludes tax, one-off services and usage. Unfiltered: it
+          includes trialing and canceled rows, so use the mrr metric, which restricts the status.
+        agg: sum
+        expr: >
+          seats * unit_price_minor * (1 - discount_pct)
+          / power(10, minor_unit_exponent) * usd_per_unit
+          / (case when billing_interval = 'year' then 12.0 else 1.0 end)
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: subscription_account_count
+        description: Distinct accounts with a subscription row at the month end (unfiltered; restrict with the paying_customers metric).
+        agg: count_distinct
+        expr: account_id
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: subscription_count
+        description: Distinct subscriptions with a row at the month end (unfiltered).
+        agg: count_distinct
+        expr: subscription_id
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: seat_count
+        description: Sum of contracted seats on the subscription version in force at month end (unfiltered).
+        agg: sum
+        expr: seats
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD as of the last month end in the period. Sums, for every
+      subscription whose version in force at the month end has status active or past_due, seats x
+      contracted unit price x (1 - discount), converted to USD at the month-end FX rate, with
+      annual plans divided by 12. Excludes trialing and canceled subscriptions, internal accounts,
+      tax, one-off services invoices and usage. Available monthly from 2023-01 to 2025-06;
+      grouping by metric_time quarter or year returns the value at the final month end of that
+      period, and grouping without metric_time returns the latest month end (2025-06-30).
+    type: simple
+    type_params:
+      measure: mrr_usd
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD, defined as MRR x 12 at the last month end in the period.
+      Same inclusions and exclusions as mrr (active and past_due subscriptions of external
+      accounts, no trials, no tax, no services, no usage).
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of distinct external billing accounts with an active or past_due subscription at
+      the last month end in the period. Excludes accounts that are only trialing, canceled
+      accounts and internal accounts. Each billing account counts as one customer (logo), so
+      child accounts of an enterprise parent count separately.
+    type: simple
+    type_params:
+      measure: subscription_account_count
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: arpa
+    label: ARPA (average MRR per account)
+    description: >
+      Average monthly recurring revenue per paying account in USD: mrr divided by
+      paying_customers at the same month end. Excludes trialing, canceled and internal accounts.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+
+  - name: paid_seats
+    label: Paid seats
+    description: >
+      Total contracted seats on active and past_due subscriptions of external accounts at the
+      last month end in the period. Excludes trial seats, canceled subscriptions and internal accounts.
+    type: simple
+    type_params:
+      measure: seat_count
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: active_subscriptions
+    label: Active subscriptions
+    description: >
+      Number of distinct subscriptions with status active or past_due at the last month end in the
+      period, for external accounts only. Equals paying_customers because an account never has
+      two live subscriptions at once, but is kept for subscription-level reporting.
+    type: simple
+    type_params:
+      measure: subscription_count
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: trialing_subscriptions
+    label: Trialing subscriptions
+    description: >
+      Number of distinct subscriptions in a free trial (status trialing) at the last month end in
+      the period, for external accounts only. Trials generate no MRR and are not customers.
+    type: simple
+    type_params:
+      measure: subscription_count
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} = 'trialing'
+      and {{ Dimension('account__is_internal') }} = false

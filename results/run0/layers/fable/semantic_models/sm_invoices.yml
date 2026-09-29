@@ -1,0 +1,137 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    label: Invoices
+    description: >
+      One row per invoice issued to an external account (built from
+      marts.fct_invoices by sem_invoices), dated by issue date.
+      Includes: subscription invoices (monthly or annual, covering period_start to
+      period_end) and one-off services invoices, in every status: draft, open,
+      paid, uncollectible, void.
+      Excludes: internal Relay accounts.
+      Amounts are converted to USD at the FX rate on the issue date. Billings
+      measures count only open, paid and uncollectible invoices (is_billable);
+      draft and void invoices were never owed by the customer. Net amount is
+      subtotal minus discount and excludes sales tax.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+        description: The invoice.
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: Subscription billed; null for services invoices.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account invoiced.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account) the invoice rolls up to.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan in force at period_start; null for services invoices.
+      - name: calendar_date
+        type: foreign
+        expr: issued_date
+        description: Issue date, for fiscal calendar attributes.
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the invoice was issued. Billings are dated by this.
+      - name: due_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Payment due date.
+      - name: period_start
+        type: time
+        type_params:
+          time_granularity: day
+        description: First day of the service period the invoice covers (issue date for services).
+      - name: period_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Day after the last day of service covered (exclusive end).
+      - name: invoice_type
+        type: categorical
+        description: subscription (recurring seat charges) or services (one-off professional services).
+      - name: invoice_status
+        type: categorical
+        expr: status
+        description: >
+          draft (not yet sent, not owed), open (issued, unpaid, not yet due or
+          overdue), paid (settled by a succeeded payment), uncollectible (issued,
+          never paid, written off), void (cancelled, never owed).
+      - name: is_billable
+        type: categorical
+        description: True for open, paid and uncollectible invoices; these are the invoices that count as billings.
+      - name: billing_interval
+        type: categorical
+        description: month or year, from the plan billed; null for services invoices.
+      - name: plan_family
+        type: categorical
+        description: Product tier billed (Starter, Growth, Scale, Enterprise); null for services invoices.
+      - name: currency
+        type: categorical
+        description: Invoice currency (USD, EUR, GBP, JPY).
+    measures:
+      - name: billings_usd
+        label: Billings (USD)
+        agg: sum
+        expr: case when is_billable then net_amount_usd else 0 end
+        description: >
+          Net amount invoiced in USD: subtotal minus discount, before tax, for
+          open, paid and uncollectible invoices of external accounts, at the
+          issue-date FX rate. Includes subscription and services invoices.
+          Excludes draft and void invoices and sales tax.
+      - name: billings_local
+        label: Billings (local currency)
+        agg: sum
+        expr: case when is_billable then net_amount_local else 0 end
+        description: Net billings in the invoice currency (major units). Only meaningful when grouped or filtered by currency.
+      - name: billings_gross_usd
+        label: Billings including tax (USD)
+        agg: sum
+        expr: case when is_billable then total_usd else 0 end
+        description: Total invoiced including sales tax, in USD, for open, paid and uncollectible invoices. Equals the amount customers were asked to pay.
+      - name: invoice_tax_usd
+        label: Invoiced tax (USD)
+        agg: sum
+        expr: case when is_billable then tax_usd else 0 end
+        description: Sales tax charged on open, paid and uncollectible invoices, in USD. Pass-through, not revenue.
+      - name: invoice_discount_usd
+        label: Invoice discounts (USD)
+        agg: sum
+        expr: case when is_billable then discount_usd else 0 end
+        description: Discounts deducted on open, paid and uncollectible invoices, in USD.
+      - name: uncollectible_usd
+        label: Uncollectible billings (USD)
+        agg: sum
+        expr: case when is_uncollectible then net_amount_usd else 0 end
+        description: Net amount of invoices written off as uncollectible (bad debt), in USD, dated by issue date.
+      - name: open_receivable_usd
+        label: Open receivables (USD)
+        agg: sum
+        expr: case when is_open then total_usd else 0 end
+        description: Total including tax of invoices still in open status (issued, unpaid, not written off), in USD, dated by issue date.
+      - name: billable_invoice_count
+        label: Invoices issued
+        agg: sum
+        expr: case when is_billable then 1 else 0 end
+        description: Number of open, paid and uncollectible invoices issued. Excludes draft and void.
+      - name: voided_invoice_count
+        label: Voided invoices
+        agg: sum
+        expr: case when is_void then 1 else 0 end
+        description: Number of invoices voided (never owed).

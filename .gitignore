@@ -1,0 +1,8 @@
+.venv/
+data/
+build/
+relay_dbt/target/
+relay_dbt/logs/
+relay_dbt/.user.yml
+logs/
+__pycache__/

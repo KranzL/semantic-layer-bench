@@ -1,0 +1,89 @@
+version: 2
+
+metrics:
+  - name: bookings
+    label: Bookings
+    description: >
+      Total USD amount of opportunities closed won in the period, dated by close date. Includes both new and
+      expansion opportunities. Amounts are CRM contract values, not invoiced amounts. Excludes lost and open
+      opportunities and internal and soft-deleted accounts. Slice by sales_rep__team, sales_rep__rep_name,
+      opportunity__opportunity_type, account__segment or account__region.
+    type: simple
+    type_params:
+      measure: won_amount_usd
+
+  - name: new_bookings
+    label: New bookings
+    description: USD amount of closed won opportunities of type 'new' (first sale to an account), dated by close date.
+    type: simple
+    type_params:
+      measure: new_won_amount_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: USD amount of closed won opportunities of type 'expansion' (additional sale to an existing account), dated by close date.
+    type: simple
+    type_params:
+      measure: expansion_won_amount_usd
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Number of opportunities closed won in the period, dated by close date.
+    type: simple
+    type_params:
+      measure: won_opportunities
+
+  - name: lost_opportunities
+    label: Lost opportunities
+    description: Number of opportunities closed lost in the period, dated by close date.
+    type: simple
+    type_params:
+      measure: lost_opportunities
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Number of opportunities closed (won or lost) in the period, dated by close date. Open opportunities are excluded.
+    type: simple
+    type_params:
+      measure: closed_opportunities
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Won opportunities divided by closed opportunities (won + lost) in the period, by close date, as a fraction
+      (0.55 = 55%). Open opportunities are not in the denominator. Count based, not amount weighted.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+
+  - name: average_deal_size
+    label: Average deal size
+    description: Bookings divided by won opportunities in the period, in USD per won deal, by close date.
+    type: ratio
+    type_params:
+      numerator: bookings
+      denominator: won_opportunities
+
+  - name: open_pipeline
+    label: Open pipeline
+    description: >
+      USD amount of opportunities currently in stage open, dated by their expected close date (which can be in
+      the future). A current snapshot of the CRM, not a historical pipeline.
+    type: simple
+    type_params:
+      measure: open_amount_usd
+
+  - name: open_opportunities
+    label: Open opportunities
+    description: Number of opportunities currently in stage open, dated by expected close date.
+    type: simple
+    type_params:
+      measure: open_opportunities
+
+  - name: opportunities_created
+    label: Opportunities created
+    description: Number of opportunities of any type and stage created in the period, dated by creation date.
+    type: simple
+    type_params:
+      measure: opportunities_created

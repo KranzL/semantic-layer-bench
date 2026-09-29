@@ -1,0 +1,57 @@
+version: 2
+
+semantic_models:
+  - name: sem_payments
+    description: >
+      One row per payment attempt against an invoice (fct_payments), including both
+      successful and failed attempts.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: invoice_id
+        type: foreign
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar date the payment attempt was received/processed.
+      - name: status
+        type: categorical
+        description: >
+          "succeeded" or "failed". A failed attempt followed by a later successful retry
+          produces two separate payment rows; only "succeeded" rows represent cash
+          actually collected.
+      - name: method
+        type: categorical
+        description: "Payment method used: card, wire or ach."
+    measures:
+      - name: cash_collected_amount
+        description: >
+          Cash actually collected from customers, in USD, converted at the payment date's
+          fx rate. Only includes payments with status "succeeded"; excludes failed payment
+          attempts and Relay's internal/test accounts. Does not net out refunds/credit
+          notes issued later (see the refunds metric for those).
+        agg: sum
+        expr: >
+          case when status = 'succeeded'
+          then amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+          end
+
+metrics:
+  - name: cash_collected
+    description: >
+      Cash collected: total successful payments received from customers, in USD. Excludes
+      failed payment attempts, is not netted against refunds/credit notes (see refunds),
+      and excludes Relay's internal/test accounts. Slice by received_date (metric_time),
+      method, and via joined account dimensions by segment, region and billing_currency.
+    type: simple
+    type_params:
+      measure: cash_collected_amount
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false

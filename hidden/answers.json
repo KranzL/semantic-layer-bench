@@ -1,0 +1,152 @@
+{
+ "q01": {
+  "question": "What was our MRR at the end of June 2025, in USD?",
+  "kind": "number",
+  "answer": 4179919.612759244
+ },
+ "q02": {
+  "question": "What was ARR at the end of December 2024?",
+  "kind": "number",
+  "answer": 39682396.3217029
+ },
+ "q03": {
+  "question": "How many paying customers did we have at the end of March 2025?",
+  "kind": "count",
+  "answer": 1135.0
+ },
+ "q04": {
+  "question": "What was ARPA at the end of June 2025?",
+  "kind": "number",
+  "answer": 3506.6439704356076
+ },
+ "q05": {
+  "question": "How many customers churned in May 2025?",
+  "kind": "count",
+  "answer": 33.0
+ },
+ "q06": {
+  "question": "What was the logo churn rate in April 2025?",
+  "kind": "rate",
+  "answer": 0.02643171806167401
+ },
+ "q07": {
+  "question": "What were total billings in January through March 2025?",
+  "kind": "number",
+  "answer": 12859851.771045279
+ },
+ "q08": {
+  "question": "What were total billings in fiscal year 2025?",
+  "kind": "number",
+  "answer": 40163903.79255653
+ },
+ "q09": {
+  "question": "How much revenue did we recognize in March 2025?",
+  "kind": "number",
+  "answer": 3912678.763913122
+ },
+ "q10": {
+  "question": "How much revenue did we recognize in Q3 of fiscal 2025?",
+  "kind": "number",
+  "answer": 8182083.323781658
+ },
+ "q11": {
+  "question": "How much cash did we collect in June 2025?",
+  "kind": "number",
+  "answer": 6077323.450633957
+ },
+ "q12": {
+  "question": "What was the total amount refunded to customers in 2024?",
+  "kind": "number",
+  "answer": 347537.23990477994
+ },
+ "q13": {
+  "question": "How many billable API calls did customers make in May 2025?",
+  "kind": "number",
+  "answer": 53231957.0
+ },
+ "q14": {
+  "question": "What was MRR from EMEA customers at the end of June 2025?",
+  "kind": "number",
+  "answer": 1113419.7655106634
+ },
+ "q15": {
+  "question": "What was MRR from the Enterprise segment at the end of December 2024?",
+  "kind": "number",
+  "answer": 2411352.806204925
+ },
+ "q16": {
+  "question": "How many paying customers were on an annual plan at the end of June 2025?",
+  "kind": "count",
+  "answer": 578.0
+ },
+ "q17": {
+  "question": "What were new-business bookings in Q4 of fiscal 2025?",
+  "kind": "number",
+  "answer": 7887673.999999999
+ },
+ "q18": {
+  "question": "What were total bookings in calendar year 2024?",
+  "kind": "number",
+  "answer": 29532689.570000008
+ },
+ "q19": {
+  "question": "What was our win rate in the first half of 2025?",
+  "kind": "rate",
+  "answer": 0.6142557651991615
+ },
+ "q20": {
+  "question": "What was the EMEA Sales team's win rate in 2024?",
+  "kind": "rate",
+  "answer": 0.5579567779960707
+ },
+ "q21": {
+  "question": "How much did MRR grow between the end of June 2024 and the end of June 2025?",
+  "kind": "number",
+  "answer": 1893505.2265685112
+ },
+ "q22": {
+  "question": "What were 2024 billings from customers billed in Japanese yen, in USD?",
+  "kind": "number",
+  "answer": 3698139.9488912923
+ },
+ "q23": {
+  "question": "What share of June 2025 billings came from services invoices?",
+  "kind": "rate",
+  "answer": 0.13577770290206848
+ },
+ "q24": {
+  "question": "What was net cash, meaning cash collected minus refunds, in April through June 2025?",
+  "kind": "number",
+  "answer": 18527182.08398853
+ },
+ "q25": {
+  "question": "How many paying customers were on a Growth plan at the end of December 2024?",
+  "kind": "count",
+  "answer": 458.0
+ },
+ "q26": {
+  "question": "How many billable API calls did Enterprise-segment customers make in January through March 2025?",
+  "kind": "number",
+  "answer": 87082525.0
+ },
+ "q27": {
+  "question": "What was ARR from customers billed in British pounds at the end of June 2025, in USD?",
+  "kind": "number",
+  "answer": 4789414.930252799
+ },
+ "q28": {
+  "question": "How many new customers did we add in April through June 2025?",
+  "kind": "count",
+  "answer": 149.0
+ },
+ "q29": {
+  "question": "How many customers churned in calendar year 2024 in total?",
+  "kind": "count",
+  "answer": 199.0
+ },
+ "q30": {
+  "question": "Which sales rep had the highest bookings in fiscal year 2025?",
+  "kind": "text",
+  "answer": "Nia Reyes"
+ }
+}

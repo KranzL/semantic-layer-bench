@@ -1,0 +1,194 @@
+version: 2
+
+metrics:
+  # ---------------------------------------------------------------------------
+  # Customer counts (snapshots)
+  # ---------------------------------------------------------------------------
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of distinct customers (top-level accounts, a parent with its child accounts counting once) with
+      at least one active or past_due subscription at month end. Customers only in trial are not paying.
+      Excludes internal and soft-deleted accounts. Snapshot: by quarter or year it returns the last month end
+      of the period. When sliced by a billing-account dimension (account__segment) a parent/child family that
+      spans two values is counted in each.
+    type: simple
+    type_params:
+      measure: paying_customers_distinct
+
+  - name: paying_accounts
+    label: Paying accounts
+    description: >
+      Number of distinct billing accounts with an active or past_due subscription at month end. Unlike
+      paying_customers, child accounts are counted separately from their parent. Excludes trials, internal
+      and soft-deleted accounts. Snapshot at the last month end of the period.
+    type: simple
+    type_params:
+      measure: paying_accounts_distinct
+
+  - name: arpa
+    label: ARPA
+    description: >
+      Average recurring revenue per account: MRR divided by paying customers at month end, in USD per
+      customer per month (top-level customers, so a parent with child accounts is one customer). Same
+      inclusions and exclusions as MRR and paying_customers. Snapshot at the last month end of the period.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+
+  - name: customers_at_start_of_period
+    label: Customers at start of period
+    description: >
+      Number of paying customers at the previous month end (the opening logo count). Over a quarter or year
+      it returns the value at the start of the first month in the period, so it is the denominator for churn
+      rate over any period. Excludes trials, internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: customers_at_start_of_period
+
+  # ---------------------------------------------------------------------------
+  # Customer flows (additive across months)
+  # ---------------------------------------------------------------------------
+  - name: new_customers
+    label: New customers
+    description: >
+      Customers whose first ever paying month (first month end with an active or past_due subscription) falls
+      in the period. Trial starts are not new customers; a customer that churned and later came back is a
+      reactivation, not new. Counted at the top-level customer (logo) level. Excludes internal and
+      soft-deleted accounts. Additive across months.
+    type: simple
+    type_params:
+      measure: new_customers
+
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: >
+      Customers paying at this month end who were not paying at the previous month end but had paid in an
+      earlier month (won back after churning). Logo level. Additive across months.
+    type: simple
+    type_params:
+      measure: reactivated_customers
+
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Customers paying at the previous month end who have no active or past_due subscription at this month
+      end. Counted once, in the first non-paying month; a later reactivation does not reverse it. Logo level
+      (a parent churns only when all its accounts stop paying). Excludes internal and soft-deleted accounts.
+      Additive across months. Dated by the month the customer stopped paying.
+    type: simple
+    type_params:
+      measure: churned_customers
+
+  - name: retained_customers
+    label: Retained customers
+    description: Customers paying at both this and the previous month end. Logo level. Only meaningful at month grain.
+    type: simple
+    type_params:
+      measure: retained_customers
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Churned customers in the period divided by paying customers at the start of the period (previous month
+      end for a month; start of the first month for a quarter or year). Expressed as a fraction (0.02 = 2%).
+      Logo level; excludes trials, internal and soft-deleted accounts.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: customers_at_start_of_period
+
+  # ---------------------------------------------------------------------------
+  # MRR movements (USD, additive across months)
+  # ---------------------------------------------------------------------------
+  - name: beginning_mrr
+    label: Beginning MRR
+    description: >
+      MRR in USD at the previous month end (opening balance). Over a quarter or year it returns the opening
+      balance of the first month in the period. Same definition as mrr.
+    type: simple
+    type_params:
+      measure: beginning_mrr_usd
+
+  - name: new_mrr
+    label: New MRR
+    description: MRR (USD) added by customers in their first ever paying month. Logo level. Additive.
+    type: simple
+    type_params:
+      measure: new_mrr_usd
+
+  - name: reactivation_mrr
+    label: Reactivation MRR
+    description: MRR (USD) added by customers that reactivated after churning. Additive.
+    type: simple
+    type_params:
+      measure: reactivation_mrr_usd
+
+  - name: expansion_mrr
+    label: Expansion MRR
+    description: >
+      Month-over-month MRR increase (USD) from customers paying in both months: more seats, plan upgrades,
+      lower discounts, and FX gains on EUR/GBP/JPY contracts. Additive.
+    type: simple
+    type_params:
+      measure: expansion_mrr_usd
+
+  - name: contraction_mrr
+    label: Contraction MRR
+    description: >
+      Month-over-month MRR decrease (USD) from customers paying in both months: fewer seats, downgrades,
+      higher discounts, and FX losses on EUR/GBP/JPY contracts. Reported as a positive number. Additive.
+    type: simple
+    type_params:
+      measure: contraction_mrr_usd
+
+  - name: churned_mrr
+    label: Churned MRR
+    description: Previous-month MRR (USD) of customers that churned in the period. Reported as a positive number. Additive.
+    type: simple
+    type_params:
+      measure: churned_mrr_usd
+
+  - name: net_new_mrr
+    label: Net new MRR
+    description: >
+      Change in MRR over the period: new + reactivation + expansion - contraction - churned MRR, in USD.
+      Equals ending MRR minus beginning MRR.
+    type: derived
+    type_params:
+      expr: new_mrr + reactivation_mrr + expansion_mrr - contraction_mrr - churned_mrr
+      metrics:
+        - name: new_mrr
+        - name: reactivation_mrr
+        - name: expansion_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+
+  - name: gross_mrr_churn_rate
+    label: Gross MRR churn rate
+    description: >
+      (Churned MRR + contraction MRR) in the period divided by beginning MRR, as a fraction. Includes FX-driven
+      contraction on non-USD contracts. Excludes trials, internal and soft-deleted accounts.
+    type: derived
+    type_params:
+      expr: (churned_mrr + contraction_mrr) / beginning_mrr
+      metrics:
+        - name: churned_mrr
+        - name: contraction_mrr
+        - name: beginning_mrr
+
+  - name: net_revenue_retention
+    label: Net revenue retention
+    description: >
+      (Beginning MRR + expansion - contraction - churned MRR) / beginning MRR, as a fraction (1.05 = 105%).
+      Measures how MRR from customers that were paying at the start of the period changed, excluding new and
+      reactivated customers. Includes FX effects on non-USD contracts.
+    type: derived
+    type_params:
+      expr: (beginning_mrr + expansion_mrr - contraction_mrr - churned_mrr) / beginning_mrr
+      metrics:
+        - name: beginning_mrr
+        - name: expansion_mrr
+        - name: contraction_mrr
+        - name: churned_mrr

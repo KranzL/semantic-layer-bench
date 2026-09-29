@@ -1,0 +1,117 @@
+version: 2
+
+# Sales metrics from the opportunity pipeline. Amounts are annual contract
+# value in USD as entered by sales, dated by close date. Slice by
+# opportunity__sales_team, sales_rep__rep_name, opportunity__opportunity_type,
+# account__segment or account__region.
+
+metrics:
+  - name: bookings
+    label: Bookings
+    description: >
+      USD amount of opportunities closed won, dated by close date. Includes new
+      business and expansion. Excludes open and lost opportunities and internal
+      accounts. Not derived from invoices; use billings for amounts invoiced.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings
+    description: USD amount of closed-won opportunities of type new (an account's first purchase), dated by close date. Excludes expansion deals.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: USD amount of closed-won opportunities of type expansion (additional business on an existing account), dated by close date.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Number of opportunities closed won, dated by close date.
+    type: simple
+    type_params:
+      measure: won_opportunity_count
+
+  - name: lost_opportunities
+    label: Lost opportunities
+    description: Number of opportunities closed lost, dated by close date.
+    type: simple
+    type_params:
+      measure: lost_opportunity_count
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Number of opportunities closed won or lost, dated by close date. Open deals excluded.
+    type: simple
+    type_params:
+      measure: closed_opportunity_count
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      won_opportunities divided by closed_opportunities (won + lost), as a
+      fraction, by close date. Open opportunities are not in the denominator.
+      Covers new and expansion deals together; filter by
+      opportunity__opportunity_type or use new_business_win_rate.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+
+  - name: new_business_win_rate
+    label: New business win rate
+    description: Won divided by closed opportunities, restricted to opportunity_type = new, as a fraction by close date.
+    type: ratio
+    type_params:
+      numerator:
+        name: won_opportunities
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+      denominator:
+        name: closed_opportunities
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: expansion_win_rate
+    label: Expansion win rate
+    description: Won divided by closed opportunities, restricted to opportunity_type = expansion, as a fraction by close date.
+    type: ratio
+    type_params:
+      numerator:
+        name: won_opportunities
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+      denominator:
+        name: closed_opportunities
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+
+  - name: average_deal_size
+    label: Average deal size
+    description: bookings divided by won_opportunities, in USD per won deal, by close date.
+    type: ratio
+    type_params:
+      numerator: bookings
+      denominator: won_opportunities
+
+  - name: open_pipeline
+    label: Open pipeline
+    description: USD amount of opportunities still open, dated by expected close date. Not bookings.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd
+
+  - name: open_opportunities
+    label: Open opportunities
+    description: Number of opportunities still open, dated by expected close date.
+    type: simple
+    type_params:
+      measure: open_opportunity_count
+
+  - name: opportunities_created
+    label: Opportunities created
+    description: Number of opportunities created, dated by created date, in any stage or type.
+    type: simple
+    type_params:
+      measure: created_opportunity_count

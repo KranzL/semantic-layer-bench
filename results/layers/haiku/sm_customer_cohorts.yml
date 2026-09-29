@@ -1,0 +1,45 @@
+semantic_model:
+  name: sm_customer_cohorts
+  description: >
+    Customer cohort tracking model. One row per account per month.
+    Tracks new customers, paying customers, and churn events.
+  node_relation:
+    schema_name: marts
+    alias: sm_customer_cohorts
+  defaults:
+    agg_time_dimension: month_end
+  measures:
+    - name: new_customers
+      description: Count of new customers (first subscription) in month
+      agg: sum
+      expr: is_new_customer
+    - name: paying_customers
+      description: Count of customers with active subscriptions in month
+      agg: sum
+      expr: is_paying
+    - name: churned_customers
+      description: Count of customers who churned this month
+      agg: sum
+      expr: churned_this_month
+    - name: count_accounts
+      description: Count of distinct accounts
+      agg: count_distinct
+      expr: account_id
+  dimensions:
+    - name: account_id
+      description: Customer account ID
+      type: categorical
+      role: foreign_key
+    - name: month_end
+      description: Last day of the month
+      type: time
+      time_granularity: day
+    - name: is_paying
+      description: Whether account had active subscription in month
+      type: categorical
+    - name: churned_this_month
+      description: Whether account churned in this month
+      type: categorical
+    - name: is_new_customer
+      description: Whether this is customer's first month
+      type: categorical

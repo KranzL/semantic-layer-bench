@@ -1,0 +1,24 @@
+semantic_model:
+  name: dim_sales_reps
+  description: Sales representatives dimension. Includes all sales team members with their team and regional assignments.
+  node_relation:
+    schema_name: marts
+    alias: dim_sales_reps
+  dimensions:
+    - name: rep_id
+      description: Unique sales representative identifier
+      type: categorical
+      primary_key: true
+    - name: rep_name
+      description: Name of sales representative
+      type: categorical
+    - name: team
+      description: Sales team assignment (NA Sales, EMEA Sales, APAC Sales)
+      type: categorical
+    - name: region
+      description: Geographic region (NA, EMEA, APAC)
+      type: categorical
+    - name: hired_at
+      description: Date when sales representative was hired
+      type: time
+      time_granularity: day

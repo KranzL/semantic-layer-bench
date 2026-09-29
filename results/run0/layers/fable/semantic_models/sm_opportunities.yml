@@ -1,0 +1,115 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    label: Sales opportunities
+    description: >
+      One row per sales opportunity (built from marts.fct_opportunities by
+      sem_opportunities), dated by close_date (actual close for won/lost,
+      expected close for open). Amounts are annual contract value in USD as
+      entered by sales, not derived from invoices.
+      Includes: new-business and expansion opportunities in stages open,
+      closed_won and closed_lost, for all external accounts including child and
+      deleted accounts.
+      Excludes: internal accounts (none exist in the source).
+      Bookings are closed_won amounts; win rate is closed_won divided by all
+      closed (won + lost), never counting open opportunities.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: The opportunity.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account the deal is with.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account) the deal rolls up to.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Rep who owns the opportunity.
+      - name: calendar_date
+        type: foreign
+        expr: close_date
+        description: Close date, for fiscal calendar attributes.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Actual close date for won and lost deals; expected close date for open deals.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created.
+      - name: opportunity_type
+        type: categorical
+        description: new (first purchase by the account) or expansion (additional business on an existing account).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+      - name: sales_team
+        type: categorical
+        description: Team of the owning rep (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      - name: deal_size_band
+        type: categorical
+        expr: >
+          case when amount_usd < 5000 then 'a. <5k' when amount_usd < 25000 then 'b. 5k-25k'
+               when amount_usd < 100000 then 'c. 25k-100k' else 'd. 100k+' end
+        description: Opportunity amount bucketed into USD bands.
+    measures:
+      - name: bookings_usd
+        label: Bookings (USD)
+        agg: sum
+        expr: booking_usd
+        description: >
+          USD amount of closed_won opportunities, dated by close date. Includes
+          new-business and expansion deals. Excludes open and lost opportunities.
+      - name: new_bookings_usd
+        label: New bookings (USD)
+        agg: sum
+        expr: new_booking_usd
+        description: USD amount of closed_won opportunities of type new (first purchase). Excludes expansion.
+      - name: expansion_bookings_usd
+        label: Expansion bookings (USD)
+        agg: sum
+        expr: expansion_booking_usd
+        description: USD amount of closed_won opportunities of type expansion (upsell on an existing account).
+      - name: won_opportunity_count
+        label: Won opportunities
+        agg: sum
+        expr: case when is_won then 1 else 0 end
+        description: Number of opportunities in stage closed_won, dated by close date.
+      - name: lost_opportunity_count
+        label: Lost opportunities
+        agg: sum
+        expr: case when is_lost then 1 else 0 end
+        description: Number of opportunities in stage closed_lost, dated by close date.
+      - name: closed_opportunity_count
+        label: Closed opportunities
+        agg: sum
+        expr: case when is_closed then 1 else 0 end
+        description: Number of opportunities closed either way (won + lost). Open deals excluded.
+      - name: open_pipeline_usd
+        label: Open pipeline (USD)
+        agg: sum
+        expr: open_pipeline_usd
+        description: USD amount of opportunities still in stage open, dated by expected close date.
+      - name: open_opportunity_count
+        label: Open opportunities
+        agg: sum
+        expr: case when is_open then 1 else 0 end
+        description: Number of opportunities still open, dated by expected close date.
+      - name: created_opportunity_count
+        label: Opportunities created
+        agg: count
+        expr: opportunity_id
+        agg_time_dimension: created_date
+        description: Number of opportunities created, dated by created date (any stage or type).

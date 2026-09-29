@@ -1,0 +1,57 @@
+semantic_model:
+  name: fct_opportunities
+  description: >
+    Sales opportunities fact table. One row per opportunity (new customer, expansion).
+    Includes all stages (open, closed_won, closed_lost).
+    Bookings are opportunities in closed_won stage.
+  node_relation:
+    schema_name: marts
+    alias: fct_opportunities
+  defaults:
+    agg_time_dimension: created_date
+  measures:
+    - name: bookings_amount
+      description: Total value of closed won opportunities in USD.
+      agg: sum
+      expr: case when stage = 'closed_won' then amount_usd else 0 end
+    - name: count_opportunities
+      description: Count of all opportunities
+      agg: count
+    - name: count_closed_won
+      description: Count of closed won opportunities
+      agg: sum
+      expr: case when stage = 'closed_won' then 1 else 0 end
+    - name: count_new_opportunities
+      description: Count of new customer opportunities
+      agg: sum
+      expr: case when opportunity_type = 'new' then 1 else 0 end
+  dimensions:
+    - name: opportunity_id
+      description: Unique opportunity identifier
+      type: categorical
+      primary_key: true
+    - name: created_date
+      description: Date opportunity was created
+      type: time
+      time_granularity: day
+    - name: account_id
+      description: Prospective or existing customer account
+      type: categorical
+      role: foreign_key
+    - name: rep_id
+      description: Sales representative managing this opportunity
+      type: categorical
+      role: foreign_key
+    - name: opportunity_type
+      description: Type of opportunity (new, expansion, upsell)
+      type: categorical
+    - name: stage
+      description: Sales stage (open, closed_won, closed_lost, closed_other)
+      type: categorical
+    - name: close_date
+      description: Date opportunity was closed
+      type: time
+      time_granularity: day
+    - name: amount_usd
+      description: Opportunity value in USD
+      type: numeric

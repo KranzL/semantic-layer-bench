@@ -1,0 +1,119 @@
+version: 2
+
+metrics:
+  # ---------------------------------------------------------------------------
+  # Billings
+  # ---------------------------------------------------------------------------
+  - name: billings
+    label: Billings
+    description: >
+      Amount invoiced in the period, in USD at the issue-date FX rate: subtotal minus discount, before tax,
+      for issued invoices (status open, paid or uncollectible) of both subscription and services type, dated
+      by issue date. Excludes draft and void invoices, tax, and internal and soft-deleted accounts. Not reduced
+      by credit notes (see refunds). Annual plans bill the full year up front, so billings are lumpier than MRR.
+    type: simple
+    type_params:
+      measure: invoice_net_usd
+    filter: |
+      {{ Dimension('invoice__is_issued') }} = true
+
+  - name: gross_billings
+    label: Gross billings (incl. tax)
+    description: >
+      Total amount invoiced including tax, in USD at the issue-date FX rate, for issued invoices (open, paid,
+      uncollectible), dated by issue date. Excludes draft and void invoices and internal and soft-deleted
+      accounts. This is the amount customers are asked to pay.
+    type: simple
+    type_params:
+      measure: invoice_total_usd
+    filter: |
+      {{ Dimension('invoice__is_issued') }} = true
+
+  - name: invoices_issued
+    label: Invoices issued
+    description: Number of issued invoices (open, paid, uncollectible), dated by issue date. Excludes draft and void.
+    type: simple
+    type_params:
+      measure: invoice_count
+    filter: |
+      {{ Dimension('invoice__is_issued') }} = true
+
+  - name: uncollectible_billings
+    label: Uncollectible billings
+    description: >
+      Net amount (subtotal minus discount, before tax, USD at issue-date FX) of invoices written off as
+      uncollectible, dated by issue date. A subset of billings.
+    type: simple
+    type_params:
+      measure: invoice_net_usd
+    filter: |
+      {{ Dimension('invoice__status') }} = 'uncollectible'
+
+  # ---------------------------------------------------------------------------
+  # Recognized revenue
+  # ---------------------------------------------------------------------------
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: >
+      Revenue recognized in the month, in USD at the invoice issue-date FX rate, net of discount and before
+      tax. Subscription invoices are recognized ratably by day over the billed service period (annual
+      invoices spread over 12 months); services invoices are recognized in full in the issue month. Counts
+      issued invoices only (open, paid, uncollectible); draft and void invoices are excluded, as are internal
+      and soft-deleted accounts. Uncollectible invoices remain in revenue (bad debt is not netted here).
+      Not reduced by credit notes. Month is the finest grain.
+    type: simple
+    type_params:
+      measure: recognized_amount_usd
+    filter: |
+      {{ Dimension('revenue_recognition__is_issued') }} = true
+
+  # ---------------------------------------------------------------------------
+  # Cash
+  # ---------------------------------------------------------------------------
+  - name: cash_collected
+    label: Cash collected
+    description: >
+      Succeeded payments received in the period, in USD at the FX rate on the receipt date, dated by receipt
+      date. Includes tax (customers pay invoice totals). Excludes failed payment attempts and internal and
+      soft-deleted accounts. Not reduced by refunds (see net_cash_collected).
+    type: simple
+    type_params:
+      measure: payment_amount_usd
+    filter: |
+      {{ Dimension('payment__is_succeeded') }} = true
+
+  - name: failed_payments
+    label: Failed payment attempts
+    description: Number of payment attempts with status failed, dated by attempt date. Excludes internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: payment_count
+    filter: |
+      {{ Dimension('payment__status') }} = 'failed'
+
+  - name: refunds
+    label: Refunds
+    description: >
+      Credit notes issued in the period, in USD at the FX rate on the credit note date, dated by credit note
+      date. Every credit note refunds a paid invoice (reasons: billing_error, downgrade_adjustment, goodwill,
+      service_credit). Reported as a positive number. Excludes internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: credit_note_amount_usd
+
+  - name: refund_count
+    label: Refund count
+    description: Number of credit notes issued in the period. Excludes internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: credit_note_count
+
+  - name: net_cash_collected
+    label: Net cash collected
+    description: Cash collected minus refunds in the period, in USD. Each side is dated by its own event date.
+    type: derived
+    type_params:
+      expr: cash_collected - refunds
+      metrics:
+        - name: cash_collected
+        - name: refunds

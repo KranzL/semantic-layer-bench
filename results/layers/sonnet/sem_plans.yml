@@ -1,0 +1,29 @@
+version: 2
+
+semantic_models:
+  - name: sem_plans
+    description: >
+      One row per billing plan SKU that Relay sells (e.g. Starter Monthly, Growth Annual).
+      Supplies plan-level dimensions (plan name, plan family, billing interval) for slicing
+      subscription and revenue metrics via the `plan` entity. Carries no measures of its own
+      and does not indicate how many customers or how much revenue is on each plan -- that
+      comes from the subscription and revenue semantic models joined through the `plan`
+      entity. Grain: one row per plan_id.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+    dimensions:
+      - name: plan_name
+        type: categorical
+        expr: plan_name
+        description: "The specific, sellable plan SKU name (e.g. 'Growth Monthly'). One-to-one with plan_id."
+      - name: plan_family
+        type: categorical
+        expr: plan_family
+        description: "The product tier a plan belongs to, independent of billing interval (Starter, Growth, Scale, Enterprise). Use this to compare adoption across tiers regardless of whether the customer pays monthly or annually."
+      - name: billing_interval
+        type: categorical
+        expr: billing_interval
+        description: "How often the plan is invoiced: 'month' or 'year'. Note the subscription semantic model also exposes its own subscription_billing_interval sourced directly from the subscription's active plan version, which is the field actually used to annualize/de-annualize MRR and ARR."

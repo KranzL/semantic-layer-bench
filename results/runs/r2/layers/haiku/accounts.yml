@@ -1,0 +1,54 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: Customer accounts with details, geography, and billing info.
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        type: primary
+        role: identifier
+        expr: account_id
+    dimensions:
+      - name: account_id
+        type: categorical
+        expr: account_id
+        description: Unique account identifier
+      - name: account_name
+        type: categorical
+        expr: account_name
+        description: Company name of the account
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: created_date
+        description: Date the account was created in Relay
+      - name: country
+        type: categorical
+        expr: country
+        description: Country where the account is located (2-letter ISO code)
+      - name: region
+        type: categorical
+        expr: region
+        description: Sales region - NA, EU, APAC, or LATAM
+      - name: segment
+        type: categorical
+        expr: segment
+        description: Customer segment - SMB, Mid-Market, or Enterprise
+      - name: billing_currency
+        type: categorical
+        expr: billing_currency
+        description: Default billing currency for the account
+      - name: is_internal
+        type: categorical
+        expr: is_internal
+        description: Whether this is an internal test/demo account
+      - name: parent_account_id
+        type: categorical
+        expr: parent_account_id
+        description: Parent account ID if this is a sub-account
+      - name: is_deleted
+        type: categorical
+        expr: is_deleted
+        description: Whether the account has been deleted (churned out)

@@ -1,0 +1,34 @@
+version: 2
+
+semantic_models:
+  - name: sales_reps
+    description: Sales team details, assignments, and regions.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        role: identifier
+        expr: rep_id
+    dimensions:
+      - name: rep_id
+        type: categorical
+        expr: rep_id
+        description: Unique sales representative identifier
+      - name: rep_name
+        type: categorical
+        expr: rep_name
+        description: Name of the sales representative
+      - name: team
+        type: categorical
+        expr: team
+        description: Sales team name - e.g., NA Sales, EMEA Sales
+      - name: region
+        type: categorical
+        expr: region
+        description: Sales region - NA, EU, APAC, or LATAM
+      - name: hired_at
+        type: time
+        type_params:
+          time_granularity: day
+        expr: hired_at
+        description: Date the sales representative was hired

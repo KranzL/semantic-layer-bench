@@ -1,0 +1,106 @@
+version: 2
+
+semantic_models:
+  - name: sem_accounts
+    description: >
+      One row per customer account (dim_accounts). Includes every account Relay has ever
+      created, both real customers and Relay's own internal/test accounts (is_internal).
+      Every revenue and customer metric in this project joins to this model for segment,
+      region, currency and internal-account filtering; it carries no measures of its own.
+    model: ref('dim_accounts')
+    entities:
+      - name: account_id
+        type: primary
+    dimensions:
+      - name: segment
+        type: categorical
+        description: >
+          Customer size segment assigned to the account: SMB, MidMarket or Enterprise.
+          Set once per account and does not change over time in this dataset.
+      - name: region
+        type: categorical
+        description: >
+          Sales/billing region of the account: NA, EMEA, APAC or LATAM.
+      - name: country
+        type: categorical
+        description: Country of the account, as recorded on the account record.
+      - name: billing_currency
+        type: categorical
+        description: >
+          Currency the account is billed in (USD, EUR, GBP or JPY). Matches the currency
+          on every subscription, invoice, payment and credit note for the account, so this
+          is the canonical currency dimension used across all revenue metrics.
+      - name: is_internal
+        type: categorical
+        description: >
+          True for Relay's own internal/test/demo accounts (60 of 2,000 accounts). These
+          accounts generate real-looking subscriptions, invoices, payments and usage in
+          the warehouse but are not paying customers, so every metric in this project
+          excludes rows where this is true.
+      - name: is_deleted
+        type: categorical
+        description: >
+          True if the account record has since been deleted/removed from the CRM
+          (accounts.deleted_at is not null). This reflects a CRM record state, not a
+          billing status; use subscription status (see sem_subscription_economics) to
+          determine whether a deleted account is still a paying customer.
+      - name: created_date
+        type: categorical
+        description: >
+          Calendar date the account record was created. Attribute of the account only;
+          it is not used as the time spine for any metric.
+
+  - name: sem_plans
+    description: >
+      One row per billing plan (dim_plans). Used to slice subscription and billing metrics
+      by plan family and billing interval; carries no measures of its own.
+    model: ref('dim_plans')
+    entities:
+      - name: plan_id
+        type: primary
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Specific plan SKU name, e.g. "Growth Monthly".
+      - name: plan_family
+        type: categorical
+        description: >
+          Product tier the plan belongs to, independent of billing interval: Starter,
+          Growth, Scale or Enterprise.
+      - name: billing_interval
+        type: categorical
+        description: >
+          Cadence the plan is billed on: "month" or "year". Annual plans are billed
+          up front for a full year; MRR normalizes annual plans to a monthly amount
+          (see sem_subscription_economics).
+      - name: list_price_usd
+        type: categorical
+        expr: list_price_usd_minor / 100.0
+        description: >
+          Published list price of the plan in whole USD, before any account-specific
+          currency conversion or negotiated discount_pct. Actual billed seat price can
+          differ from this (see unit_price_minor on subscription versions).
+
+  - name: sem_sales_reps
+    description: >
+      One row per sales rep (dim_sales_reps). Used to slice bookings and win-rate metrics
+      by sales team and rep region; carries no measures of its own.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: rep_id
+        type: primary
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Sales rep's display name.
+      - name: team
+        type: categorical
+        description: >
+          Sales team the rep belongs to (e.g. "NA Sales", "EMEA Sales"). This is the
+          "sales team" dimension used to slice bookings, new bookings and win rate.
+      - name: region
+        type: categorical
+        description: Region the sales rep is assigned to (NA, EMEA, APAC or LATAM).
+      - name: hired_at
+        type: categorical
+        description: Date the rep was hired. Attribute of the rep only.

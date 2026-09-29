@@ -1,0 +1,66 @@
+semantic_model:
+  name: fct_invoices
+  description: >
+    Invoice fact table. One row per invoice (subscription, services, or manual).
+    Excludes invoices for deleted or internal accounts.
+  node_relation:
+    schema_name: marts
+    alias: fct_invoices
+  defaults:
+    agg_time_dimension: issued_date
+  measures:
+    - name: billings_amount
+      description: Total amount billed (subtotal - discount + tax) in USD. Sum of all invoices.
+      agg: sum
+      expr: (total_minor * usd_per_unit) / pow(10, minor_unit_exponent)
+    - name: count_invoices
+      description: Count of invoices
+      agg: count
+  dimensions:
+    - name: invoice_id
+      description: Unique invoice identifier
+      type: categorical
+      primary_key: true
+    - name: issued_date
+      description: Date invoice was issued
+      type: time
+      time_granularity: day
+    - name: account_id
+      description: Customer account for this invoice
+      type: categorical
+      role: foreign_key
+    - name: subscription_id
+      description: Subscription associated with this invoice (if any)
+      type: categorical
+    - name: invoice_type
+      description: Type of invoice (subscription, services, manual)
+      type: categorical
+    - name: status
+      description: Invoice status (draft, issued, paid, overdue, void)
+      type: categorical
+    - name: period_start
+      description: Start date of the billing period
+      type: time
+      time_granularity: day
+    - name: period_end
+      description: End date of the billing period
+      type: time
+      time_granularity: day
+    - name: currency
+      description: Invoice currency (USD, EUR, GBP, JPY)
+      type: categorical
+    - name: subtotal_minor
+      description: Invoice subtotal before discount and tax (in minor currency units)
+      type: numeric
+    - name: discount_minor
+      description: Discount amount (in minor currency units)
+      type: numeric
+    - name: tax_minor
+      description: Tax amount (in minor currency units)
+      type: numeric
+    - name: total_minor
+      description: Total invoice amount (in minor currency units)
+      type: numeric
+    - name: usd_per_unit
+      description: FX rate to USD as of invoice issued date
+      type: numeric

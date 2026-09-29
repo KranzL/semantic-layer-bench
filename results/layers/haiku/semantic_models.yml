@@ -1,0 +1,333 @@
+version: 2
+
+semantic_models:
+  - name: fct_subscription_months
+    description: Subscription monthly metrics. MRR, subscription count, and seats at monthly granularity.
+    model: ref('fct_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: subscription
+        type: primary
+        expr: subscription_id
+    measures:
+      - name: mrr_amount
+        agg: sum
+        description: Monthly recurring revenue in USD
+      - name: subscription_count
+        agg: count
+        expr: 1
+        description: Count of subscriptions
+      - name: total_seats
+        agg: sum
+        expr: seats
+        description: Total billable seats
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Last day of the month
+      - name: plan_id
+        type: categorical
+        description: Subscription plan ID
+      - name: status
+        type: categorical
+        description: Subscription status
+      - name: currency
+        type: categorical
+        description: Billing currency
+
+  - name: sm_customer_cohorts
+    description: Customer cohort tracking. New, paying, and churned customers by month.
+    model: ref('sm_customer_cohorts')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+    measures:
+      - name: new_customers
+        agg: sum
+        expr: is_new_customer
+        description: New customers count
+      - name: paying_customers
+        agg: sum
+        expr: is_paying
+        description: Paying customers count
+      - name: churned_customers
+        agg: sum
+        expr: churned_this_month
+        description: Churned customers count
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: Last day of the month
+
+  - name: fct_invoices
+    description: Invoice fact table. Billings, revenue tracking, and invoice status.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: invoice
+        type: primary
+        expr: invoice_id
+    measures:
+      - name: billings_amount
+        agg: sum
+        description: Total amount billed in USD
+      - name: invoice_count
+        agg: count
+        expr: 1
+        description: Number of invoices
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date invoice was issued
+      - name: invoice_type
+        type: categorical
+        description: Invoice type
+      - name: status
+        type: categorical
+        description: Invoice status
+
+  - name: fct_payments
+    description: Payment fact table. Cash collection tracking and payment status.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: payment
+        type: primary
+        expr: payment_id
+    measures:
+      - name: cash_collected
+        agg: sum
+        description: Cash collected in USD
+      - name: payment_count
+        agg: count
+        expr: 1
+        description: Number of payments
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date payment was received
+      - name: status
+        type: categorical
+        description: Payment status
+      - name: method
+        type: categorical
+        description: Payment method
+
+  - name: fct_credit_notes
+    description: Credit notes fact table. Refunds and billing adjustments.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+    measures:
+      - name: refunds_amount
+        agg: sum
+        description: Refunds in USD
+      - name: credit_note_count
+        agg: count
+        expr: 1
+        description: Number of credit notes
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date credit note was issued
+      - name: reason
+        type: categorical
+        description: Reason for credit note
+
+  - name: fct_revenue_recognition
+    description: Revenue recognition fact table. Recognized revenue by month for subscriptions and services.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+    measures:
+      - name: recognized_revenue
+        agg: sum
+        description: Revenue recognized in USD
+      - name: revenue_invoice_count
+        agg: count_distinct
+        expr: invoice_id
+        description: Number of invoices contributing to revenue
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: Month revenue was recognized
+
+  - name: fct_usage_daily
+    description: Daily usage fact table. Billable usage tracking by account and event type.
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+    measures:
+      - name: billable_usage
+        agg: sum
+        expr: quantity
+        description: Billable usage quantity
+      - name: usage_record_count
+        agg: count
+        expr: 1
+        description: Number of usage records
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date of usage
+      - name: event_type
+        type: categorical
+        description: Type of usage event
+
+  - name: fct_opportunities
+    description: Sales opportunities fact table. New bookings, win rate, and opportunity tracking.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: created_date
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: rep
+        type: foreign
+        expr: rep_id
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+    measures:
+      - name: bookings_amount
+        agg: sum
+        description: Value of closed won opportunities in USD
+      - name: opportunity_count
+        agg: count
+        expr: 1
+        description: Total opportunities count
+      - name: won_opportunity_count
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+        description: Closed won opportunities count
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date opportunity was created
+      - name: opportunity_type
+        type: categorical
+        description: Opportunity type
+      - name: stage
+        type: categorical
+        description: Opportunity stage
+
+  - name: dim_accounts
+    description: Customer accounts dimension. Account attributes, segment, region, currency.
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+    dimensions:
+      - name: account_id
+        type: categorical
+        description: Unique account identifier
+      - name: account_name
+        type: categorical
+        description: Account name
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date account was created
+      - name: region
+        type: categorical
+        description: Geographic region
+      - name: segment
+        type: categorical
+        description: Customer segment
+      - name: country
+        type: categorical
+        description: Country
+      - name: billing_currency
+        type: categorical
+        description: Billing currency
+
+  - name: dim_plans
+    description: Subscription plans dimension. Plan names, families, billing intervals, and pricing.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+    dimensions:
+      - name: plan_id
+        type: categorical
+        description: Unique plan identifier (primary key)
+      - name: plan_name
+        type: categorical
+        description: Plan name
+      - name: plan_family
+        type: categorical
+        description: Plan family/tier
+      - name: billing_interval
+        type: categorical
+        description: Billing interval
+
+  - name: dim_sales_reps
+    description: Sales representatives dimension. Sales team members with team and regional assignments.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: rep
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_id
+        type: categorical
+        description: Unique rep identifier
+      - name: rep_name
+        type: categorical
+        description: Sales rep name
+      - name: team
+        type: categorical
+        description: Sales team
+      - name: region
+        type: categorical
+        description: Geographic region

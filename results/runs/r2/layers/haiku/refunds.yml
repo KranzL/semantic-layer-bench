@@ -1,0 +1,37 @@
+version: 2
+
+semantic_models:
+  - name: credit_notes
+    description: Credit notes issued to accounts for refunds.
+    defaults:
+      agg_time_dimension: issued_date
+    model: ref('fct_credit_notes')
+    entities:
+      - name: account
+        type: primary
+        role: identifier
+        expr: account_id
+    measures:
+      - name: credit_note_count
+        agg: count_distinct
+        expr: credit_note_id
+        description: Count of distinct credit notes issued
+      - name: refund_minor
+        agg: sum
+        expr: amount_minor
+        description: Total refund amount in minor currency units
+      - name: refund_usd
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        description: Total refund amount in USD
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: issued_date
+        description: Date the credit note was issued
+      - name: reason
+        type: categorical
+        expr: reason
+        description: Reason for the credit note

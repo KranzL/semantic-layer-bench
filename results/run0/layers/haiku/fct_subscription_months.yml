@@ -1,0 +1,32 @@
+semantic_model:
+  name: subscriptions
+  description: "Monthly subscription records with MRR and seat counts"
+  table_name: marts.fct_subscription_months
+  defaults:
+    agg_time_dimension: month_end
+  entities:
+    - name: account_id
+      type: foreign
+    - name: plan_id
+      type: foreign
+  measures:
+    - name: mrr
+      description: "Monthly recurring revenue for active subscriptions in USD"
+      agg: sum
+      expr: case when status = 'active' then cast(seats * unit_price_minor * (1.0 - discount_pct) * usd_per_unit as bigint) / power(10, minor_unit_exponent) else 0 end
+    - name: active_subscriptions
+      description: "Count of distinct active subscriptions"
+      agg: count_distinct
+      expr: case when status = 'active' then subscription_id else null end
+  dimensions:
+    - name: subscription_id
+      type: string
+    - name: month_end
+      type: time
+      time_granularity: day
+    - name: status
+      type: categorical
+    - name: billing_interval
+      type: categorical
+    - name: currency
+      type: categorical

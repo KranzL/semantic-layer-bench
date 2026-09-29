@@ -1,0 +1,91 @@
+semantic_models:
+  - name: sem_account_month_status
+    description: >
+      One row per account per month-end, spanning every month from the
+      account's first subscription version through the last month with
+      observed billing activity (2025-06). Flags whether the account is
+      currently paying and whether this month-end represents that account's
+      first-ever paying month or a drop from paying to not-paying. This is
+      the base for new-customer and logo-churn metrics, at the account
+      grain rather than the subscription grain, so that an account moving
+      between two subscriptions (e.g. an upgrade implemented as a new
+      subscription while the old one is canceled) is not miscounted as
+      churn. Internal/test accounts are excluded.
+    model: ref('int_account_month_status')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: account_month_id
+        type: primary
+      - name: account_id
+        type: foreign
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: The last calendar day of the snapshotted month.
+      - name: segment
+        type: categorical
+        description: "The account's size segment: SMB, MidMarket or Enterprise."
+      - name: region
+        type: categorical
+        description: "The account's sales/reporting region: NA, EMEA, APAC or LATAM."
+      - name: country
+        type: categorical
+        description: "The account's billing country."
+    measures:
+      - name: new_customer_flag
+        agg: sum
+        expr: case when is_new_customer_month then 1 else 0 end
+        description: >
+          1 for the single month-end that is an account's first-ever month
+          with an active or past_due subscription, 0 otherwise. An account
+          that churns and later resubscribes is not counted as new a second
+          time; there is no separate "reactivation" metric in this layer.
+      - name: churned_customer_flag
+        agg: sum
+        expr: case when is_churned_customer_month then 1 else 0 end
+        description: >
+          1 for a month-end where the account was paying (active/past_due)
+          in the prior month-end and is not paying in this one, 0
+          otherwise. This is a logo (account) churn event, not a revenue
+          (dollar) churn measure, and it does not distinguish voluntary
+          cancellation from involuntary (e.g. failed payment left
+          unresolved).
+
+metrics:
+  - name: new_customers
+    description: >
+      Count of accounts becoming a paying customer (active or past_due
+      subscription) for the first time ever, in the given month.
+      Excludes accounts that are merely upgrading, downgrading or
+      switching subscriptions while remaining continuously paying, and
+      excludes returning/reactivated customers.
+    type: simple
+    type_params:
+      measure: new_customer_flag
+  - name: churned_logos
+    description: >
+      Count of accounts that stopped paying (dropped from active/
+      past_due to trialing-only or canceled) in the given month, i.e.
+      logo churn events. An account that switches subscriptions while
+      remaining continuously paying is not counted.
+    type: simple
+    type_params:
+      measure: churned_customer_flag
+  - name: logo_churn_rate
+    description: >
+      Logo (customer-count) churn rate: churned_logos in a month divided
+      by the paying_customers count as of the end of the prior month.
+      Not a dollar-weighted (revenue) churn rate -- an account that
+      downgrades but keeps paying does not count here at all, and every
+      churned logo counts the same regardless of its MRR.
+    type: derived
+    type_params:
+      expr: churned_logos / nullif(paying_customers_prior_month, 0)
+      metrics:
+        - name: churned_logos
+        - name: paying_customers
+          offset_window: 1 month
+          alias: paying_customers_prior_month

@@ -1,0 +1,115 @@
+version: 2
+
+semantic_models:
+  - name: sem_opportunities
+    description: >
+      One row per sales opportunity (fct_opportunities), covering both new-business and
+      expansion deals, at every stage (open, closed_won, closed_lost). No opportunities
+      in this dataset are tied to Relay's internal/test accounts.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: rep_id
+        type: foreign
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: >
+          Date the opportunity closed (won or lost) or is forecast to close while still
+          open. This is the date bookings and win-rate metrics are reported against.
+      - name: opportunity_created_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: created_date
+        description: Date the opportunity was created/opened in the CRM.
+      - name: opportunity_type
+        type: categorical
+        description: >
+          "new" (new-logo business from a net-new account) or "expansion" (additional
+          business from an existing account, e.g. upsell or seat expansion).
+      - name: stage
+        type: categorical
+        description: >
+          "open" (still being worked), "closed_won" (deal signed) or "closed_lost" (deal
+          lost). Bookings and new_bookings only count "closed_won" deals; win_rate
+          compares closed_won to all closed (closed_won + closed_lost) deals and ignores
+          still-open deals.
+    measures:
+      - name: bookings_amount
+        description: >
+          Total contract value, in USD, of won deals (stage "closed_won"), covering both
+          new-business and expansion opportunity types. Excludes open and closed_lost
+          opportunities and Relay's internal/test accounts.
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd end
+      - name: opportunity_count
+        description: >
+          Count of opportunities, at any stage. Excludes Relay's internal/test accounts.
+        agg: count
+        expr: opportunity_id
+
+metrics:
+  - name: bookings
+    description: >
+      Bookings: total contract value (USD) of all won deals (closed_won), covering both
+      new-business and expansion opportunities. Excludes open and lost deals and Relay's
+      internal/test accounts. Not the same as billings or recognized revenue, which are
+      invoice-based and can lag or lead when a deal was actually booked. Slice by
+      close_date (metric_time), opportunity_type, and via joined dimensions by sales team
+      and rep region (sem_sales_reps) or account segment/region (sem_accounts).
+    type: simple
+    type_params:
+      measure: bookings_amount
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false
+
+  - name: new_bookings
+    description: >
+      New bookings: bookings (total contract value of closed_won deals, USD) restricted
+      to opportunity_type "new", i.e. new-logo business only. Excludes expansion bookings
+      from existing customers, open/lost deals, and Relay's internal/test accounts.
+    type: simple
+    type_params:
+      measure: bookings_amount
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false and {{ Dimension('opportunity_id__opportunity_type') }} = 'new'
+
+  - name: closed_won_deals
+    description: >
+      Count of won deals (stage closed_won), of any opportunity_type. Exists to compute
+      win_rate; rarely queried directly. Excludes Relay's internal/test accounts.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false and {{ Dimension('opportunity_id__stage') }} = 'closed_won'
+
+  - name: closed_deals
+    description: >
+      Count of deals that have reached a final outcome (stage closed_won or closed_lost),
+      excluding still-open opportunities. Exists to compute win_rate; rarely queried
+      directly. Excludes Relay's internal/test accounts.
+    type: simple
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false and {{ Dimension('opportunity_id__stage') }} in ('closed_won', 'closed_lost')
+
+  - name: win_rate
+    description: >
+      Win rate: closed_won_deals divided by closed_deals (closed_won + closed_lost),
+      expressed as a fraction of deal count (not weighted by deal value). Still-open
+      opportunities are excluded from both the numerator and denominator. Excludes
+      Relay's internal/test accounts.
+    type: ratio
+    type_params:
+      numerator: closed_won_deals
+      denominator: closed_deals

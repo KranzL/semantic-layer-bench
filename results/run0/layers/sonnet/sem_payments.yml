@@ -1,0 +1,55 @@
+semantic_models:
+  - name: sem_payments
+    description: >
+      One row per payment attempt against an invoice, whether it succeeded
+      or failed. Amounts are converted to USD using the fx rate as of the
+      date the payment was received/attempted.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: invoice_id
+        type: foreign
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The calendar date the payment was received or attempted.
+      - name: status
+        type: categorical
+        description: "succeeded or failed. Failed attempts do not move any money and are excluded from cash_collected."
+      - name: method
+        type: categorical
+        description: "The payment method used: card, ach or wire."
+      - name: currency
+        type: categorical
+        description: "The payment's currency (matches the invoice it was applied to). Dollar measures on this model are already converted to USD."
+    measures:
+      - name: payment_amount_usd
+        agg: sum
+        expr: amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: >
+          Payment amount in USD for every payment attempt regardless of
+          outcome (including failed attempts). Always used together with a
+          status filter (via the cash_collected metric) -- summing this
+          measure directly would count failed, uncollected attempts as cash.
+
+metrics:
+  - name: cash_collected
+    description: >
+      Actual cash received from customers, in USD: the sum of succeeded
+      payments only. Excludes failed payment attempts and excludes
+      Relay's internal/test accounts. Distinct from billings (invoiced,
+      regardless of payment) and recognized_revenue (earned, regardless
+      of payment).
+    type: simple
+    type_params:
+      measure: payment_amount_usd
+    filter: |
+      {{ Dimension('payment_id__status') }} = 'succeeded'
+      and not {{ Dimension('account_id__is_internal') }}

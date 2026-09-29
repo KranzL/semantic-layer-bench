@@ -1,0 +1,272 @@
+version: 2
+
+semantic_models:
+  # ---------------------------------------------------------------------------
+  # Subscription month-end snapshots (MRR, ARR, seats)
+  # ---------------------------------------------------------------------------
+  - name: subscription_months
+    description: >
+      Month-end snapshot of every subscription: one row per subscription per calendar month end from
+      2023-01-31 to 2025-06-30, showing the subscription version (plan, seats, price, discount, status)
+      in force on that day. Internal and soft-deleted accounts are excluded. This is the source of MRR,
+      ARR and paid seats. Only subscriptions with status 'active' or 'past_due' at month end are paying;
+      'trialing' (14-day free trial, never invoiced) and 'canceled' rows are present but carry zero MRR
+      and zero paid seats. A subscription whose cancellation is scheduled but whose term has not ended
+      (is_pending_cancellation) is still active and still counts. MRR is in USD at the month-end FX rate:
+      seats x per-seat price x (1 - discount) in the subscription currency, divided by 12 for annual plans.
+      Taxes, one-off services invoices, usage and credit notes are not part of MRR. The measures here are
+      point-in-time balances: when grouped by quarter or year (or not by time at all) they return the value
+      at the latest month end in the period, not a sum across months.
+    model: ref('sl_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        description: Surrogate key subscription_id|month_end. Primary key of the snapshot.
+        type: primary
+        expr: subscription_month_id
+      - name: subscription
+        description: Subscription identifier (subscription_id). An account can have at most one paying subscription at a time; a second subscription means the account re-subscribed after cancelling.
+        type: foreign
+        expr: subscription_id
+      - name: account
+        description: Billing account that owns the subscription. Joins to the accounts model (account__ dimensions).
+        type: foreign
+        expr: account_id
+      - name: customer
+        description: Top-level customer (parent account, or the account itself). Joins to the customers model (customer__ dimensions).
+        type: foreign
+        expr: customer_id
+      - name: plan
+        description: Plan in force at month end. Joins to the plans model (plan__ dimensions).
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: month_end
+        description: Calendar month-end date the snapshot was taken on (last day of the month). Metric time for this model.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        description: Subscription status at month end. One of trialing, active, past_due, canceled.
+        type: categorical
+      - name: is_paying
+        description: True when status is active or past_due, i.e. the subscription contributes MRR and paid seats.
+        type: categorical
+      - name: is_trialing
+        description: True when the subscription is in its free trial at month end (no MRR).
+        type: categorical
+      - name: is_pending_cancellation
+        description: True when the customer has requested cancellation but the paid term runs past this month end (still paying).
+        type: categorical
+      - name: plan_name
+        description: Plan display name at month end (denormalised from plans), e.g. 'Scale Annual'.
+        type: categorical
+      - name: plan_family
+        description: "Plan tier at month end: Starter, Growth, Scale or Enterprise."
+        type: categorical
+      - name: billing_interval
+        description: "Billing interval of the plan at month end: 'month' or 'year'. Annual MRR is the annual price divided by 12."
+        type: categorical
+      - name: currency
+        description: "Subscription (contract) currency: USD, EUR, GBP or JPY. Same as the account billing currency."
+        type: categorical
+      - name: has_discount
+        description: True when a contractual discount percentage is applied to the per-seat price.
+        type: categorical
+      - name: discount_pct
+        description: Contractual discount as a fraction of the per-seat price (0, 0.1 or 0.2).
+        type: categorical
+      - name: subscription_created_date
+        description: Date the subscription was created (trial start for subscriptions that started with a trial).
+        type: time
+        type_params:
+          time_granularity: day
+      - name: canceled_date
+        description: Date the cancellation was requested, if any. The subscription keeps paying until ended_date.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: ended_date
+        description: Date the subscription actually ended (status becomes canceled), if any.
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month end: seats x per-seat price x (1 - discount), converted
+          from the subscription currency at the month-end FX rate, divided by 12 for annual plans. Zero for
+          trialing and canceled subscriptions. Excludes tax, services invoices, usage and credit notes.
+          Point-in-time: returns the latest month end in the period when grouped by a coarser grain.
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: arr_usd
+        description: Annual recurring revenue in USD at month end, defined as MRR x 12. Same inclusions and exclusions as mrr_usd. Point-in-time.
+        agg: sum
+        expr: arr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: mrr_local
+        description: >
+          MRR in the subscription's own currency (major units) at month end. Only meaningful when grouped by
+          currency; never sum across currencies. Point-in-time.
+        agg: sum
+        expr: mrr_local
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paid_seats
+        description: Seats on paying (active or past_due) subscriptions at month end. Trialing and canceled seats are excluded. Point-in-time.
+        agg: sum
+        expr: paid_seats
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_subscriptions
+        description: Number of subscriptions with status active or past_due at month end. Point-in-time.
+        agg: sum
+        expr: case when is_paying then 1 else 0 end
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: trialing_subscriptions
+        description: Number of subscriptions in free trial at month end. Point-in-time.
+        agg: sum
+        expr: case when is_trialing then 1 else 0 end
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_customers_distinct
+        description: >
+          Distinct top-level customers with at least one paying (active or past_due) subscription at month end.
+          A parent and its child accounts count once. Point-in-time.
+        agg: count_distinct
+        expr: case when is_paying then customer_id end
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_accounts_distinct
+        description: Distinct billing accounts with a paying subscription at month end (child accounts counted separately from their parent). Point-in-time.
+        agg: count_distinct
+        expr: case when is_paying then account_id end
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+  # ---------------------------------------------------------------------------
+  # Customer lifecycle by month (new, churned, reactivated, MRR movements)
+  # ---------------------------------------------------------------------------
+  - name: customer_months
+    description: >
+      Customer ("logo") lifecycle by calendar month: one row per top-level customer per month end from the
+      customer's first paying month onward, including the first month after a paying month so churn is
+      visible. Child accounts are rolled into their parent. Internal and soft-deleted accounts are excluded.
+      A customer is paying in a month when any of its subscriptions is active or past_due at that month end;
+      trial-only customers are not paying. Lifecycle flags compare each month with the previous month end:
+      new (first ever paying month), reactivated (paying again after a gap), churned (paying last month, not
+      this month; counted in the first non-paying month), retained (paying both months). MRR movements
+      (new, reactivation, expansion, contraction, churned) are in USD at each month-end FX rate and
+      reconcile exactly: beginning MRR + new + reactivation + expansion - contraction - churned = ending MRR.
+      Because MRR is in USD, expansion and contraction include FX rate moves on non-USD contracts.
+    model: ref('sl_customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        description: Surrogate key customer_id|month_end. Primary key.
+        type: primary
+        expr: customer_month_id
+      - name: customer
+        description: Top-level customer. Joins to the customers model (customer__ dimensions such as segment, region, billing_currency).
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: month_end
+        description: Calendar month-end date of the observation. Metric time for this model.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: lifecycle_status
+        description: >
+          Customer state this month: 'new' (first paying month), 'reactivated' (paying again after a gap),
+          'retained' (paying this month and last), 'churned' (not paying this month, paying last month).
+        type: categorical
+      - name: is_paying
+        description: True when the customer has at least one active or past_due subscription at month end.
+        type: categorical
+      - name: was_paying_prior_month
+        description: True when the customer was paying at the previous month end.
+        type: categorical
+    measures:
+      - name: customer_mrr_usd
+        description: MRR in USD summed over all of the customer's subscriptions at month end (same definition as mrr_usd in subscription_months). Point-in-time.
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: paying_customers
+        description: "Number of top-level customers paying at month end (active or past_due subscription; trials excluded). Point-in-time: latest month end in the period."
+        agg: sum
+        expr: case when is_paying then 1 else 0 end
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: customers_at_start_of_period
+        description: >
+          Number of customers that were paying at the previous month end, i.e. the opening logo count. When
+          grouped by quarter or year this returns the value at the EARLIEST month in the period, so it is the
+          right denominator for churn rate over any period.
+        agg: sum
+        expr: case when was_paying_prior_month then 1 else 0 end
+        non_additive_dimension:
+          name: month_end
+          window_choice: min
+      - name: beginning_mrr_usd
+        description: MRR in USD at the previous month end (opening MRR). Returns the earliest month in the period when grouped by a coarser grain.
+        agg: sum
+        expr: prior_month_mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: min
+      - name: new_customers
+        description: Customers whose first ever paying month is this month. Reactivations after churn are not new. Additive across months.
+        agg: sum
+        expr: case when is_new then 1 else 0 end
+      - name: reactivated_customers
+        description: Customers paying this month who were not paying last month but had paid in an earlier month. Additive.
+        agg: sum
+        expr: case when is_reactivated then 1 else 0 end
+      - name: churned_customers
+        description: Customers paying at the previous month end who are not paying at this month end (logo churn). Counted in the first non-paying month. Additive.
+        agg: sum
+        expr: case when is_churned then 1 else 0 end
+      - name: retained_customers
+        description: Customers paying at both this and the previous month end. Additive; only meaningful at month grain.
+        agg: sum
+        expr: case when is_retained then 1 else 0 end
+      - name: new_mrr_usd
+        description: MRR (USD) of customers in their first ever paying month.
+        agg: sum
+        expr: new_mrr_usd
+      - name: reactivation_mrr_usd
+        description: MRR (USD) of customers that reactivated this month.
+        agg: sum
+        expr: reactivation_mrr_usd
+      - name: expansion_mrr_usd
+        description: Month-over-month MRR increase (USD) of retained customers (more seats, upgrades, lower discount, and FX gains on non-USD contracts).
+        agg: sum
+        expr: expansion_mrr_usd
+      - name: contraction_mrr_usd
+        description: Month-over-month MRR decrease (USD) of retained customers (fewer seats, downgrades, higher discount, and FX losses on non-USD contracts). Positive number.
+        agg: sum
+        expr: contraction_mrr_usd
+      - name: churned_mrr_usd
+        description: Previous-month MRR (USD) of customers that churned this month. Positive number.
+        agg: sum
+        expr: churned_mrr_usd

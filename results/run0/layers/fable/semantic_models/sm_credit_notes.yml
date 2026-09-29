@@ -1,0 +1,85 @@
+version: 2
+
+semantic_models:
+  - name: credit_notes
+    label: Credit notes (refunds)
+    description: >
+      One row per credit note issued to an external account (built from
+      marts.fct_credit_notes by sem_credit_notes), dated by the credit note issue
+      date. Every credit note in the warehouse is issued against a subscription
+      invoice that had already been paid in full, after the payment, so credit
+      notes are cash refunds returned to the customer. Amounts are converted to
+      USD at the FX rate on the credit note date. Excludes internal accounts.
+      Reasons: billing_error, downgrade_adjustment, goodwill, service_credit.
+    model: ref('sem_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+        description: The credit note.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Paid invoice being partially or fully refunded.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account refunded.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account).
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan on the refunded invoice.
+      - name: calendar_date
+        type: foreign
+        expr: issued_date
+        description: Credit note date, for fiscal calendar attributes.
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued; refunds are dated by this.
+      - name: refund_reason
+        type: categorical
+        expr: reason
+        description: >
+          Why the refund was given: billing_error (we invoiced wrongly),
+          downgrade_adjustment (mid-period downgrade credited back), goodwill
+          (commercial gesture) or service_credit (SLA or outage compensation).
+      - name: invoice_type
+        type: categorical
+        description: Type of the refunded invoice (all are subscription today).
+      - name: billing_interval
+        type: categorical
+        description: month or year of the refunded invoice's plan.
+      - name: plan_family
+        type: categorical
+        description: Product tier of the refunded invoice.
+      - name: currency
+        type: categorical
+        description: Credit note currency (matches the invoice).
+    measures:
+      - name: refunds_usd
+        label: Refunds (USD)
+        agg: sum
+        expr: amount_usd
+        description: >
+          Credit note amounts in USD at the credit-note-date FX rate. All reasons
+          included; all are cash returned against already-paid invoices.
+          Excludes internal accounts. Reported as a positive number.
+      - name: refunds_local
+        label: Refunds (local currency)
+        agg: sum
+        expr: amount_local
+        description: Credit note amounts in their own currency. Only meaningful when grouped or filtered by currency.
+      - name: refund_count
+        label: Refund count
+        agg: count
+        expr: credit_note_id
+        description: Number of credit notes issued.

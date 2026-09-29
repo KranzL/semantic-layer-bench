@@ -1,0 +1,261 @@
+{
+ "answers": {
+  "q01": 4179919.612759244,
+  "q02": 39682396.3217029,
+  "q03": 1135.0,
+  "q04": 3506.6439704356076,
+  "q05": 33.0,
+  "q06": 0.02643171806167401,
+  "q07": 12859851.771045279,
+  "q08": 40163903.79255653,
+  "q09": 3912678.763913122,
+  "q10": 8182083.323781658,
+  "q11": 6077323.450633957,
+  "q12": 347537.23990477994,
+  "q13": 53231957.0,
+  "q14": 1113419.7655106634,
+  "q15": 2411352.806204925,
+  "q16": 578.0,
+  "q17": 7887673.999999999,
+  "q18": 29532689.570000008,
+  "q19": 0.6142557651991615,
+  "q20": 0.5579567779960707,
+  "q21": 1893505.2265685112,
+  "q22": 3698139.9488912923,
+  "q23": 0.13577770290206848,
+  "q24": 18527182.08398853,
+  "q25": 458.0,
+  "q26": 87082525.0,
+  "q27": 4789414.930252799,
+  "q28": 149.0,
+  "q29": 199.0,
+  "q30": "Nia Reyes"
+ },
+ "environment": {
+  "claude_cli": "2.1.283 (Claude Code)",
+  "generator_seed": 20260926,
+  "models_in_session_logs": {
+   "claude-fable-5-1": 211,
+   "claude-haiku-4-5-20251001": 211,
+   "claude-opus-5-5": 211,
+   "claude-sonnet-5": 211,
+   "muse-spark-1.3-contributor": 211
+  },
+  "muse_cli": "Muse Code 1.4.0 (1.4.0-R4302.1)",
+  "packages": {
+   "dbt-core": "1.12.5",
+   "dbt-duckdb": "1.11.0",
+   "dbt-metricflow": "0.15.0",
+   "duckdb": "1.5.5",
+   "metricflow": "0.213.0"
+  },
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "python": "3.13.15"
+ },
+ "layers": {
+  "fable": {
+   "build": 0,
+   "parse": 0,
+   "validate": 0
+  },
+  "haiku": {
+   "build": 0,
+   "parse": 0,
+   "validate": 1
+  },
+  "muse": {
+   "build": 0,
+   "parse": 0,
+   "validate": 0
+  },
+  "opus": {
+   "build": 0,
+   "parse": 0,
+   "validate": 0
+  },
+  "sonnet": {
+   "build": 0,
+   "parse": 0,
+   "validate": 0
+  }
+ },
+ "reference_answers": {
+  "q01": 4179919.612759244,
+  "q03": 1135.0,
+  "q05": 33.0,
+  "q07": 12859851.771045279,
+  "q09": 3912678.763913122,
+  "q11": 6077323.450633957,
+  "q12": 347537.23990477994,
+  "q13": 53231957.0,
+  "q18": 29532689.570000008,
+  "q19": 0.6142557651991615,
+  "q28": 149.0,
+  "q29": 199.0
+ },
+ "results": {
+  "grid": {
+   "fable": {
+    "fable": 21,
+    "haiku": 18,
+    "muse": 19,
+    "opus": 21,
+    "sonnet": 22
+   },
+   "haiku": {
+    "fable": 12,
+    "haiku": 3,
+    "muse": 13,
+    "opus": 12,
+    "sonnet": 5
+   },
+   "muse": {
+    "fable": 29,
+    "haiku": 21,
+    "muse": 30,
+    "opus": 29,
+    "sonnet": 28
+   },
+   "none": {
+    "fable": 18,
+    "haiku": 3,
+    "muse": 12,
+    "opus": 17,
+    "sonnet": 9
+   },
+   "opus": {
+    "fable": 20,
+    "haiku": 17,
+    "muse": 18,
+    "opus": 18,
+    "sonnet": 19
+   },
+   "reference": {
+    "fable": 30,
+    "haiku": 27,
+    "muse": 30,
+    "opus": 30,
+    "sonnet": 29
+   },
+   "sonnet": {
+    "fable": 12,
+    "haiku": 8,
+    "muse": 14,
+    "opus": 16,
+    "sonnet": 12
+   }
+  },
+  "pooled": {
+   "fable": 101,
+   "haiku": 45,
+   "muse": 137,
+   "none": 59,
+   "opus": 92,
+   "reference": 146,
+   "sonnet": 62
+  },
+  "sessions": 1050
+ },
+ "tables": {
+  "marts.dim_accounts": [
+   2000,
+   "3ed8155f86bd3ef0ad380de79ce08460"
+  ],
+  "marts.dim_date": [
+   1826,
+   "70b8ecb5698334150eec7f886880003b"
+  ],
+  "marts.dim_plans": [
+   7,
+   "e42998dc3260a7caf920f66b5f2e833a"
+  ],
+  "marts.dim_sales_reps": [
+   14,
+   "b47daf7b346fc802a2cd87f4ebf28ab0"
+  ],
+  "marts.fct_credit_notes": [
+   279,
+   "6b1a237fd7a068b36877801a44cc08c3"
+  ],
+  "marts.fct_invoices": [
+   11695,
+   "078e0ecd5c3493be71f02ae2901c913e"
+  ],
+  "marts.fct_opportunities": [
+   4306,
+   "800155ff709bc791f4df6104e024ace4"
+  ],
+  "marts.fct_payments": [
+   11504,
+   "c162bd837fdd4a41b13a99ae35365b63"
+  ],
+  "marts.fct_revenue_recognition": [
+   34662,
+   "532850c973b96c546cbad93d3cab0a77"
+  ],
+  "marts.fct_subscription_months": [
+   29030,
+   "589bb287a3421461dad83d240e4e4eb4"
+  ],
+  "marts.fct_usage_daily": [
+   1175466,
+   "d1164acd4ba6a9b732a98f38c48a32c8"
+  ],
+  "marts.metricflow_time_spine": [
+   1826,
+   "7a5c12de06e7c4ec3ac99c33ddeb9997"
+  ],
+  "raw.accounts": [
+   2000,
+   "3c06fd34ce7b0d52fa73c1d141ed6290"
+  ],
+  "raw.credit_notes": [
+   279,
+   "5004a717be409ab5bb673b4cccb7d8c7"
+  ],
+  "raw.currencies": [
+   4,
+   "83bfaed0e0bbe865a91d4c01245f1a75"
+  ],
+  "raw.fiscal_calendar": [
+   1826,
+   "d2c80ccca6620efe9c228e97997cc5f0"
+  ],
+  "raw.fx_rates": [
+   3896,
+   "8ea4a3b5779355c8e89964a08775b710"
+  ],
+  "raw.invoices": [
+   11695,
+   "07557641dc58b1ea37448046fccd0076"
+  ],
+  "raw.opportunities": [
+   4306,
+   "1672832ce6753038ac7c32cc36618df1"
+  ],
+  "raw.payments": [
+   11504,
+   "160c74ce25397ab415c175ae8310ec05"
+  ],
+  "raw.plans": [
+   7,
+   "e42998dc3260a7caf920f66b5f2e833a"
+  ],
+  "raw.sales_reps": [
+   14,
+   "b47daf7b346fc802a2cd87f4ebf28ab0"
+  ],
+  "raw.subscription_versions": [
+   4701,
+   "e101f5ce988582caf30f46a89976a758"
+  ],
+  "raw.subscriptions": [
+   2032,
+   "e11541fe1bff9ca3712b878a1ed256a4"
+  ],
+  "raw.usage_events": [
+   1175466,
+   "5434235e5f9c5c8442114a18108e7aad"
+  ]
+ }
+}

@@ -1,0 +1,154 @@
+version: 2
+
+semantic_models:
+  # ---------------------------------------------------------------------------
+  # Product usage
+  # ---------------------------------------------------------------------------
+  - name: usage_daily
+    description: >
+      Daily product usage: one row per billing account per day per event type, for reportable accounts
+      (internal QA/demo/sandbox accounts, which generate a large share of raw API traffic, and soft-deleted
+      accounts are excluded). Two event types exist: 'api_call' (customer-driven, billable) and
+      'health_check' (platform monitoring pings at a fixed 288 per account per day, not billable). Usage is
+      recorded for accounts in any subscription status, including trials.
+    model: ref('sl_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_daily
+        description: Surrogate key account_id|usage_date|event_type. Primary key.
+        type: primary
+        expr: usage_daily_id
+      - name: account
+        description: Billing account that generated the usage. Joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: customer
+        description: Top-level customer. Joins to customers.
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: usage_date
+        description: Day the usage occurred. Metric time for usage.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: event_type
+        description: "'api_call' (billable) or 'health_check' (not billable)."
+        type: categorical
+      - name: is_billable
+        description: True for api_call events, false for health_check.
+        type: categorical
+    measures:
+      - name: usage_quantity
+        description: Total event quantity of all event types, billable or not.
+        agg: sum
+        expr: quantity
+      - name: billable_usage_quantity
+        description: Quantity of api_call events only (health checks excluded).
+        agg: sum
+        expr: billable_quantity
+      - name: active_usage_accounts
+        description: Distinct billing accounts with any usage row on the day.
+        agg: count_distinct
+        expr: account_id
+
+  # ---------------------------------------------------------------------------
+  # Sales opportunities (bookings, pipeline, win rate)
+  # ---------------------------------------------------------------------------
+  - name: opportunities
+    description: >
+      One row per CRM opportunity for reportable accounts (internal and soft-deleted accounts excluded).
+      Opportunity types: 'new' (first sale to an account) and 'expansion' (additional sale to an existing
+      account). Stages: 'open', 'closed_won', 'closed_lost'. Amounts are contract values already in USD as
+      entered in the CRM; they are not derived from billing. close_date is the actual close date for closed
+      opportunities and the expected close date for open ones, so open opportunities can sit in future months.
+      Bookings and win rate are dated by close_date; opportunity creation is dated by created_date.
+    model: ref('sl_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        description: Opportunity identifier (opportunity_id). Primary key.
+        type: primary
+        expr: opportunity_id
+      - name: account
+        description: Billing account the opportunity is for. Joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: customer
+        description: Top-level customer of the account. Joins to customers.
+        type: foreign
+        expr: customer_id
+      - name: sales_rep
+        description: Rep who owns the opportunity. Joins to sales_reps (sales_rep__team, sales_rep__rep_name, sales_rep__region).
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        description: Actual close date (closed opportunities) or expected close date (open). Metric time for bookings and win rate.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: created_date
+        description: Date the opportunity was created in the CRM.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: opportunity_type
+        description: "'new' or 'expansion'."
+        type: categorical
+      - name: stage
+        description: "'open', 'closed_won' or 'closed_lost'."
+        type: categorical
+      - name: is_won
+        description: True when stage is closed_won.
+        type: categorical
+      - name: is_closed
+        description: True when stage is closed_won or closed_lost.
+        type: categorical
+      - name: is_open
+        description: True when stage is open.
+        type: categorical
+    measures:
+      - name: opportunity_amount_usd
+        description: Opportunity amount in USD, all stages. Filter on stage for bookings or pipeline.
+        agg: sum
+        expr: amount_usd
+      - name: won_amount_usd
+        description: Amount of closed_won opportunities in USD (bookings), dated by close date. Zero for other stages.
+        agg: sum
+        expr: won_amount_usd
+      - name: new_won_amount_usd
+        description: Amount of closed_won opportunities of type 'new' in USD.
+        agg: sum
+        expr: new_won_amount_usd
+      - name: expansion_won_amount_usd
+        description: Amount of closed_won opportunities of type 'expansion' in USD.
+        agg: sum
+        expr: expansion_won_amount_usd
+      - name: open_amount_usd
+        description: Amount of open opportunities in USD (pipeline), dated by expected close date.
+        agg: sum
+        expr: open_amount_usd
+      - name: won_opportunities
+        description: Count of closed_won opportunities, dated by close date.
+        agg: sum
+        expr: case when is_won then 1 else 0 end
+      - name: lost_opportunities
+        description: Count of closed_lost opportunities, dated by close date.
+        agg: sum
+        expr: case when is_lost then 1 else 0 end
+      - name: closed_opportunities
+        description: Count of closed opportunities (won + lost), dated by close date.
+        agg: sum
+        expr: case when is_closed then 1 else 0 end
+      - name: open_opportunities
+        description: Count of open opportunities, dated by expected close date.
+        agg: sum
+        expr: case when is_open then 1 else 0 end
+      - name: opportunities_created
+        description: Count of opportunities of any stage, dated by the day they were created.
+        agg: count
+        expr: opportunity_id
+        agg_time_dimension: created_date

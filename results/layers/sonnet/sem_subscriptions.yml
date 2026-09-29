@@ -1,0 +1,133 @@
+version: 2
+
+semantic_models:
+  - name: sem_subscriptions
+    description: >
+      One row per subscription per calendar month-end snapshot (2023-01-31 through
+      2025-06-30), showing the subscription's plan, seats, price and status as of that
+      month-end. A subscription that has been canceled continues to appear in every
+      subsequent month-end snapshot with status = 'canceled' (it does not disappear), so
+      this model can be used both to measure recurring revenue in force and to detect when
+      an account stops being a paying customer. Includes subscriptions for internal/QA
+      test accounts at the row level (join to the accounts semantic model's is_internal
+      dimension if you need them for debugging), but every metric defined on this model
+      (mrr, arr, paying_customers, arpa) filters internal accounts out by default. Grain:
+      one row per (subscription_id, month_end).
+    model: ref('fct_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: "subscription_id || '-' || cast(month_end as varchar)"
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: plan
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        expr: month_end
+        description: "The last calendar day of the month this snapshot represents. This is the point-in-time date the subscription's status, plan, seats and price were captured at, and is the time spine for MRR, ARR, paying-customer and ARPA metrics."
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: "The subscription's lifecycle status as of this month-end: 'trialing' (in trial, not yet billed), 'active' (paying, in good standing), 'past_due' (paying customer whose most recent payment failed and is being retried, service not yet canceled), or 'canceled' (subscription has ended and is not recurring revenue). MRR/ARR/paying-customer metrics treat 'active' and 'past_due' as paying; 'trialing' and 'canceled' are excluded."
+      - name: subscription_billing_interval
+        type: categorical
+        expr: billing_interval
+        description: "How often this subscription's active plan version is invoiced: 'month' or 'year'. Used to de-annualize annual contract values into a monthly recurring-revenue equivalent."
+      - name: subscription_currency
+        type: categorical
+        expr: currency
+        description: "The currency the subscription is billed in. All recurring-revenue measures on this model are already converted to USD using the fx_rates rate for this month-end; this dimension lets you see which original currency a subscription bills in."
+    measures:
+      - name: recurring_revenue_monthly_usd
+        expr: >
+          seats * unit_price_minor * (1 - discount_pct)
+          / power(10, minor_unit_exponent) * usd_per_unit
+          / (case when billing_interval = 'year' then 12.0 else 1.0 end)
+        agg: sum
+        description: >
+          Raw, unfiltered monthly-equivalent recurring revenue for a subscription-month row,
+          in USD: seats x unit price x (1 - discount), converted to whole currency units and
+          to USD at the month-end fx rate, and divided by 12 for annual-billed subscriptions
+          so annual contracts are expressed on the same monthly basis as monthly contracts.
+          Does not filter by subscription_status or by internal account -- it includes
+          trialing, canceled and internal-account rows at their nominal contract value. The
+          `mrr` metric applies the active/past_due and non-internal filters on top of this
+          measure; query this raw measure directly only if you specifically want unfiltered
+          contract value.
+      - name: paying_account_count
+        expr: account_id
+        agg: count_distinct
+        description: >
+          Distinct count of accounts appearing on this model. Unfiltered, this counts every
+          account with a subscription row in the period regardless of status or account
+          type; the `paying_customers` metric filters this to subscription_status in
+          ('active', 'past_due') and excludes internal accounts to count only real,
+          currently-paying customers.
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly Recurring Revenue: the monthly-equivalent value, in USD, of all
+      subscriptions with status 'active' or 'past_due' as of a given month-end. Includes
+      seat count, list price and discount for both monthly- and annual-billed plans
+      (annual contracts are divided by 12 so they are expressed monthly). Excludes
+      subscriptions that are still 'trialing' (not yet a paying commitment) or already
+      'canceled', excludes one-off services invoices entirely (those are billings/
+      revenue, not recurring), and excludes Relay's own internal/QA test accounts.
+    type: simple
+    type_params:
+      measure: recurring_revenue_monthly_usd
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and not {{ Dimension('account__is_internal') }}
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual Recurring Revenue: MRR annualized (MRR x 12), in USD. Carries the exact same
+      inclusions and exclusions as the mrr metric -- it is a run-rate projection of
+      current active/past_due recurring revenue, not a sum of actual annual billings.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying Customers
+    description: >
+      Distinct count of accounts with at least one subscription in status 'active' or
+      'past_due' as of a given month-end. Counts an account once even if it has multiple
+      subscriptions. Excludes accounts that are only 'trialing' (not yet paying) or whose
+      only subscriptions are 'canceled', and excludes Relay's own internal/QA test
+      accounts.
+    type: simple
+    type_params:
+      measure: paying_account_count
+    filter: |
+      {{ Dimension('subscription_month__subscription_status') }} in ('active', 'past_due')
+      and not {{ Dimension('account__is_internal') }}
+
+  - name: arpa
+    label: ARPA
+    description: >
+      Average Revenue Per Account: MRR divided by the number of paying customers in the
+      same period, in USD. Reflects the same inclusions/exclusions as the mrr and
+      paying_customers metrics it is built from (active/past_due subscriptions only,
+      internal accounts excluded).
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers

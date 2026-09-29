@@ -1,0 +1,47 @@
+semantic_model:
+  name: fct_credit_notes
+  description: >
+    Credit notes fact table. One row per credit note issued.
+    Represents refunds, adjustments, and service credits.
+    Excludes credit notes for deleted or internal accounts.
+  node_relation:
+    schema_name: marts
+    alias: fct_credit_notes
+  defaults:
+    agg_time_dimension: issued_date
+  measures:
+    - name: refunds_amount
+      description: Total refunds issued in USD. Sum of all credit notes.
+      agg: sum
+      expr: (amount_minor * usd_per_unit) / pow(10, minor_unit_exponent)
+    - name: count_credit_notes
+      description: Count of credit notes issued
+      agg: count
+  dimensions:
+    - name: credit_note_id
+      description: Unique credit note identifier
+      type: categorical
+      primary_key: true
+    - name: issued_date
+      description: Date credit note was issued
+      type: time
+      time_granularity: day
+    - name: account_id
+      description: Customer account for this credit note
+      type: categorical
+      role: foreign_key
+    - name: invoice_id
+      description: Invoice associated with this credit note
+      type: categorical
+    - name: reason
+      description: Reason for credit note (billing_error, service_credit, churn, dispute)
+      type: categorical
+    - name: currency
+      description: Credit note currency (USD, EUR, GBP, JPY)
+      type: categorical
+    - name: amount_minor
+      description: Credit note amount (in minor currency units)
+      type: numeric
+    - name: usd_per_unit
+      description: FX rate to USD as of credit note issued date
+      type: numeric

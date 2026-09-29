@@ -1,0 +1,33 @@
+version: 2
+
+semantic_models:
+  - name: usage
+    description: Daily billable usage by account and event type.
+    defaults:
+      agg_time_dimension: usage_date
+    model: ref('fct_usage_daily')
+    entities:
+      - name: account
+        type: primary
+        role: identifier
+        expr: account_id
+    measures:
+      - name: billable_usage_total
+        agg: sum
+        expr: quantity
+        description: Total billable usage quantity across all event types
+      - name: api_call_usage
+        agg: sum
+        expr: case when event_type = 'api_call' then quantity else 0 end
+        description: Total API call usage quantity
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: usage_date
+        description: Date the usage occurred
+      - name: event_type
+        type: categorical
+        expr: event_type
+        description: Type of usage event - e.g., api_call

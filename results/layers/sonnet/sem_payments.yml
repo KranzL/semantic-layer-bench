@@ -1,0 +1,64 @@
+version: 2
+
+semantic_models:
+  - name: sem_payments
+    description: >
+      One row per payment attempt against an invoice, whether it succeeded or failed.
+      Grain: one row per payment_id.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        expr: received_date
+        description: "The calendar date the payment attempt was processed/received. Cash collected is recognized on this date."
+      - name: payment_status
+        type: categorical
+        expr: status
+        description: "'succeeded' for a payment that actually collected cash, or 'failed' for a declined/failed attempt that collected nothing. The cash_collected metric includes only 'succeeded' payments."
+      - name: payment_method
+        type: categorical
+        expr: method
+        description: "How the payment was made: 'card', 'ach', or 'wire'."
+      - name: payment_currency
+        type: categorical
+        expr: currency
+        description: "The currency the payment was made in. The cash_collected measure is already converted to USD at the payment's received-date fx rate; this dimension shows the original payment currency."
+    measures:
+      - name: cash_collected_amount_usd
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+        agg: sum
+        description: >
+          Raw, unfiltered payment amount in USD, converted to whole currency units and to
+          USD at the received-date fx rate. Includes failed payment attempts at their
+          attempted amount (money that was never actually collected); the cash_collected
+          metric filters this to succeeded payments only.
+
+metrics:
+  - name: cash_collected
+    label: Cash Collected
+    description: >
+      Total cash actually collected from customers, in USD (including tax, since it is the
+      cash amount that changed hands), for payments with status 'succeeded' in the period.
+      Excludes failed payment attempts entirely -- a failed attempt collected no cash.
+      Recognized on the date the payment was received, which can be well after the invoice
+      was issued or the revenue was recognized. Not the same as billings (invoiced, whether
+      or not collected) or recognized_revenue (earned pre-tax, whether or not collected).
+    type: simple
+    type_params:
+      measure: cash_collected_amount_usd
+    filter: |
+      {{ Dimension('payment__payment_status') }} = 'succeeded'

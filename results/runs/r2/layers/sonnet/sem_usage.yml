@@ -1,0 +1,49 @@
+version: 2
+
+semantic_models:
+  - name: sem_usage
+    description: >
+      One row per account per usage date per event type (fct_usage_daily), pre-aggregated
+      from raw usage events. Includes both billable API usage and an internal health-check
+      heartbeat that every account emits (a constant, non-billable value used to confirm
+      the integration is connected).
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: account_id
+        type: primary
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar date the usage occurred.
+      - name: event_type
+        type: categorical
+        description: >
+          "api_call" (customer-driven API usage; this is the billable usage type) or
+          "health_check" (a fixed-size automated heartbeat/ping emitted daily by every
+          account's integration; not customer usage and not billable).
+    measures:
+      - name: billable_usage_quantity
+        description: >
+          Sum of billable API call volume (event_type "api_call" only). Excludes
+          "health_check" heartbeat events, which are a constant, non-billable diagnostic
+          signal rather than customer usage, and excludes Relay's internal/test accounts.
+        agg: sum
+        expr: case when event_type = 'api_call' then quantity end
+
+metrics:
+  - name: billable_usage
+    description: >
+      Billable usage: total count of billable API calls (event_type "api_call") across
+      accounts. Excludes the "health_check" heartbeat event type (a constant, non-billable
+      diagnostic signal) and Relay's internal/test accounts. Slice by usage_date
+      (metric_time) and, via joined account dimensions, by segment, region and
+      billing_currency.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false

@@ -1,0 +1,60 @@
+version: 2
+
+semantic_models:
+  - name: subscriptions_monthly
+    description: Monthly snapshots of active subscriptions with pricing and billing details.
+    defaults:
+      agg_time_dimension: month_end
+    model: ref('fct_subscription_months')
+    entities:
+      - name: subscription
+        type: primary
+        role: identifier
+        expr: subscription_id
+      - name: account
+        type: foreign
+        expr: account_id
+    measures:
+      - name: monthly_seats_sum
+        agg: sum
+        expr: seats
+        description: Total seats
+      - name: monthly_subscription_count
+        agg: count_distinct
+        expr: subscription_id
+        description: Count of distinct subscriptions
+      - name: monthly_account_count
+        agg: count_distinct
+        expr: account_id
+        description: Count of distinct accounts
+      - name: mrr_usd
+        agg: sum
+        expr: "case when billing_interval = 'month' then seats * unit_price_minor * (1 - discount_pct / 100.0) / power(10, minor_unit_exponent) * usd_per_unit when billing_interval = 'year' then seats * unit_price_minor / 12.0 * (1 - discount_pct / 100.0) / power(10, minor_unit_exponent) * usd_per_unit else 0 end"
+        description: Monthly Recurring Revenue in USD
+      - name: arr_usd
+        agg: sum
+        expr: "case when billing_interval = 'month' then seats * unit_price_minor * 12.0 * (1 - discount_pct / 100.0) / power(10, minor_unit_exponent) * usd_per_unit when billing_interval = 'year' then seats * unit_price_minor * (1 - discount_pct / 100.0) / power(10, minor_unit_exponent) * usd_per_unit else 0 end"
+        description: Annualized Recurring Revenue in USD
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        expr: month_end
+        description: Month-end date
+      - name: status
+        type: categorical
+        expr: status
+        description: Subscription status - active, trialing, or canceled
+      - name: plan_id
+        type: categorical
+        expr: plan_id
+        description: Plan ID
+      - name: billing_interval
+        type: categorical
+        expr: billing_interval
+        description: Billing interval - month or year
+      - name: currency
+        type: categorical
+        expr: currency
+        description: Billing currency

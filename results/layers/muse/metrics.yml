@@ -1,0 +1,191 @@
+version: 2
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: Monthly recurring revenue in USD at month-end. Includes active and past_due seat-based subscriptions, with annual plans normalized to one twelfth of their discounted yearly price. Excludes trials, canceled subscriptions, internal QA accounts, deleted accounts, tax, services invoices, usage charges and credit notes. Point-in-time snapshot, do not sum across months.
+    type: simple
+    type_params:
+      measure:
+        name: mrr_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__is_paying') }} = true"
+
+  - name: arr
+    label: ARR
+    description: Annualized recurring revenue in USD, equal to MRR times 12. Includes and excludes exactly what MRR includes and excludes. Point-in-time snapshot, do not sum across months.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying customers
+    description: Distinct customers with at least one active or past_due subscription at month-end. Excludes trial-only accounts, fully canceled accounts, internal QA accounts and deleted accounts. Point-in-time snapshot, do not sum across months.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_accounts
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__is_paying') }} = true"
+
+  - name: arpa
+    label: ARPA
+    description: Average revenue per paying account in USD per month, equal to MRR divided by paying customers. Includes the same subscriptions and customers as MRR and paying customers. Point-in-time snapshot, do not average across months without reweighting.
+    type: ratio
+    type_params:
+      numerator:
+        name: mrr
+      denominator:
+        name: paying_customers
+
+  - name: new_customers
+    label: New customers
+    description: Distinct customers paying for the first time in the snapshot month, meaning paying now and never paying in any earlier month in the data window. Accounts already paying in the first data month of 2023-01 count as new in 2023-01. Excludes internal QA accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_accounts
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__is_new_customer') }} = true"
+
+  - name: logo_churn
+    label: Logo churn
+    description: Distinct customers who stopped paying in the snapshot month, meaning not paying now but paying at the previous month-end. Excludes internal QA accounts and deleted accounts. Always zero in the first data month of 2023-01, which has no predecessor.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_accounts
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__is_churned') }} = true"
+
+  - name: paying_customers_prior_month
+    label: Paying customers prior month
+    description: Distinct customers that were paying at the previous month-end. This is the base for the logo churn rate. Excludes internal QA accounts and deleted accounts. Always zero in the first data month of 2023-01.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_accounts
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__was_paying_prev_month') }} = true"
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: Share of prior-month paying customers that stopped paying this month, equal to logo churn divided by prior-month paying customers. Excludes internal QA accounts and deleted accounts from both sides. Undefined in the first data month of 2023-01.
+    type: ratio
+    type_params:
+      numerator:
+        name: logo_churn
+      denominator:
+        name: paying_customers_prior_month
+
+  - name: billings
+    label: Billings
+    description: Invoiced pre-tax billings in USD by issue date. Includes subscription and services invoices with status open, paid or uncollectible. Excludes draft and void invoices, tax, internal QA accounts and deleted accounts. Differs from recognized revenue, which spreads subscription invoices over their service period.
+    type: simple
+    type_params:
+      measure:
+        name: billed_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('invoice__status') }} in ('open', 'paid', 'uncollectible') and {{ Dimension('account__is_internal') }} = false and {{ Dimension('account__is_deleted') }} = false"
+
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: Pre-tax revenue recognized in USD by recognition month. Includes subscription revenue spread ratably over each service period and services revenue recognized in the issue month, for invoices with status open, paid or uncollectible. Excludes draft and void invoices, tax, internal QA accounts and deleted accounts. Differs from billings, which attributes the full invoice to its issue date.
+    type: simple
+    type_params:
+      measure:
+        name: recognized_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__status') }} in ('open', 'paid', 'uncollectible') and {{ Dimension('account__is_internal') }} = false and {{ Dimension('account__is_deleted') }} = false"
+
+  - name: cash_collected
+    label: Cash collected
+    description: Cash received in USD by received date. Includes succeeded payments only and excludes failed payment attempts, internal QA accounts and deleted accounts. Differs from billings, which records invoiced amounts regardless of payment.
+    type: simple
+    type_params:
+      measure:
+        name: collected_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('payment__status') }} = 'succeeded' and {{ Dimension('account__is_internal') }} = false and {{ Dimension('account__is_deleted') }} = false"
+
+  - name: refunds
+    label: Refunds
+    description: Credit notes issued in USD by issue date. Includes all reasons, billing_error, downgrade_adjustment, goodwill and service_credit. Excludes internal QA accounts and deleted accounts. Reported as a positive amount representing money owed back to customers.
+    type: simple
+    type_params:
+      measure:
+        name: refund_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__is_internal') }} = false and {{ Dimension('account__is_deleted') }} = false"
+
+  - name: billable_usage
+    label: Billable usage
+    description: Billable API call volume by usage date. Includes api_call events only and excludes health_check monitoring pings, internal QA accounts and deleted accounts. Unit is API calls.
+    type: simple
+    type_params:
+      measure:
+        name: usage_quantity
+        fill_nulls_with: 0
+    filter: "{{ Dimension('account__event_type') }} = 'api_call' and {{ Dimension('account__is_internal') }} = false and {{ Dimension('account__is_deleted') }} = false"
+
+  - name: bookings
+    label: Bookings
+    description: Closed-won contract value in USD by close date. Includes new-business and expansion opportunities. Excludes open pipeline and closed-lost opportunities. All opportunities in the data belong to real customers.
+    type: simple
+    type_params:
+      measure:
+        name: booking_amount_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+
+  - name: new_bookings
+    label: New bookings
+    description: Closed-won new-business contract value in USD by close date. Includes new opportunities only and excludes expansion, open pipeline and closed-lost opportunities.
+    type: simple
+    type_params:
+      measure:
+        name: booking_amount_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('opportunity__stage') }} = 'closed_won' and {{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: Closed-won expansion contract value in USD by close date. Includes expansion opportunities only and excludes new-business, open pipeline and closed-lost opportunities.
+    type: simple
+    type_params:
+      measure:
+        name: booking_amount_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('opportunity__stage') }} = 'closed_won' and {{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Count of closed-won opportunities by close date. Includes new-business and expansion. Excludes open pipeline and closed-lost opportunities.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_opportunities
+        fill_nulls_with: 0
+    filter: "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Count of closed opportunities by close date, equal to closed-won plus closed-lost. Includes new-business and expansion. Excludes open pipeline.
+    type: simple
+    type_params:
+      measure:
+        name: distinct_opportunities
+        fill_nulls_with: 0
+    filter: "{{ Dimension('opportunity__stage') }} in ('closed_won', 'closed_lost')"
+
+  - name: win_rate
+    label: Win rate
+    description: Share of closed opportunities that were won, equal to won opportunities divided by closed opportunities, counted by deal rather than by amount. Excludes open pipeline.
+    type: ratio
+    type_params:
+      numerator:
+        name: won_opportunities
+      denominator:
+        name: closed_opportunities

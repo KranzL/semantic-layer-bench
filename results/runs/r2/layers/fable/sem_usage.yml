@@ -1,0 +1,117 @@
+version: 2
+
+# Product usage metrics: billable usage and API calls.
+
+models:
+  - name: usage_daily_classified
+    description: >
+      Helper model: daily usage per account and event type (from fct_usage_daily) with the
+      subscription status in force on the usage date and an is_billable flag. Billable = api_call
+      events on a day with an active or past_due subscription. health_check events are a fixed
+      288-per-day heartbeat and are never billable. Internal accounts are kept and excluded at
+      the metric level.
+    columns:
+      - name: usage_day_id
+        description: Surrogate key account_id|usage_date|event_type.
+      - name: subscription_status_on_date
+        description: active, past_due, trialing, canceled or none (no subscription version in force).
+      - name: is_billable
+        description: True for api_call quantity on days with an active or past_due subscription.
+
+semantic_models:
+  - name: usage_daily
+    description: >
+      Daily usage per account and event type from the usage_daily_classified helper
+      (2023-01-03 to 2025-06-30). Two event types: api_call (metered product usage, quantity =
+      number of calls) and health_check (a constant 288 platform heartbeat pings per account per
+      day, not usage of the product). Each row is tagged with the subscription status the account
+      had that day. Includes internal accounts, whose QA traffic is a large share of API calls, so
+      metrics filter them out.
+    model: ref('usage_daily_classified')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        description: Surrogate key account_id|usage_date|event_type. Primary key.
+        type: primary
+        expr: usage_day_id
+      - name: account
+        description: Account that generated the usage; joins to accounts.
+        type: foreign
+        expr: account_id
+      - name: subscription
+        description: Subscription in force on the usage date, if any.
+        type: foreign
+        expr: subscription_id
+      - name: plan
+        description: Plan in force on the usage date, if any; joins to plans.
+        type: foreign
+        expr: plan_id
+      - name: calendar_date
+        description: Usage date; joins to fiscal_calendar.
+        type: foreign
+        expr: usage_date
+    dimensions:
+      - name: usage_date
+        description: Calendar date the usage occurred.
+        type: time
+        type_params:
+          time_granularity: day
+      - name: event_type
+        description: api_call (metered, billable when on a paid subscription) or health_check (heartbeat, never billable).
+        type: categorical
+      - name: subscription_status_on_date
+        description: Subscription status in force on the usage date, active, past_due, trialing, canceled or none.
+        type: categorical
+      - name: is_billable
+        description: True when the row is api_call usage on a day the account had an active or past_due subscription.
+        type: categorical
+    measures:
+      - name: usage_quantity
+        description: Sum of event quantity across all event types and statuses (unfiltered).
+        agg: sum
+        expr: quantity
+      - name: billable_usage_quantity
+        description: Sum of api_call quantity on days with an active or past_due subscription; 0 for other rows.
+        agg: sum
+        expr: case when is_billable then quantity else 0 end
+      - name: usage_account_count
+        description: Distinct accounts with any usage row.
+        agg: count_distinct
+        expr: account_id
+
+metrics:
+  - name: billable_usage
+    label: Billable usage (API calls)
+    description: >
+      Number of API calls made by external accounts on days when they held an active or past_due
+      subscription. Excludes health_check heartbeat events, usage during free trials, usage after
+      cancellation or before any subscription, and internal accounts.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+    filter: |
+      {{ Dimension('account__is_internal') }} = false
+
+  - name: api_calls
+    label: API calls (all)
+    description: >
+      Total API calls by external accounts regardless of subscription status (includes trial,
+      past-cancellation and pre-subscription usage). Excludes health_check events and internal
+      accounts. billable_usage is the subset on paid subscriptions.
+    type: simple
+    type_params:
+      measure: usage_quantity
+    filter: |
+      {{ Dimension('usage_day__event_type') }} = 'api_call'
+      and {{ Dimension('account__is_internal') }} = false
+
+  - name: active_usage_accounts
+    label: Accounts with API usage
+    description: Distinct external accounts that made at least one API call in the period (any subscription status). Excludes health checks and internal accounts.
+    type: simple
+    type_params:
+      measure: usage_account_count
+    filter: |
+      {{ Dimension('usage_day__event_type') }} = 'api_call'
+      and {{ Dimension('account__is_internal') }} = false

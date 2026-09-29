@@ -1,0 +1,67 @@
+semantic_models:
+  - name: sem_revenue_recognition
+    description: >
+      One row per invoice per calendar month over which some of that
+      invoice's value is recognized. Subscription invoices are recognized
+      ratably (evenly split across every day of their service period,
+      period_start through period_end); one-time services invoices are
+      recognized in full on their issue date. Amounts are converted to USD
+      using the fx rate as of the invoice's issue date.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: recognized_invoice_month_id
+        type: primary
+        expr: invoice_id || '-' || cast(recognized_month as varchar)
+      - name: invoice_id
+        type: foreign
+      - name: account_id
+        type: foreign
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: The calendar month in which this slice of the invoice's value is recognized.
+      - name: invoice_type
+        type: categorical
+        description: "subscription (recognized ratably over the service period) or services (recognized in full on the issue date)."
+      - name: status
+        type: categorical
+        description: "The underlying invoice's status: draft, open, paid, uncollectible or void."
+      - name: currency
+        type: categorical
+        description: "The underlying invoice's billing currency. Dollar measures on this model are already converted to USD."
+    measures:
+      - name: recognized_amount_usd
+        agg: sum
+        expr: recognized_amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: >
+          The slice of an invoice's (subtotal - discount) recognized in a
+          given calendar month, in USD, for every invoice regardless of
+          status (including draft and void). Always used together with a
+          status filter (via the recognized_revenue metric) -- summing this
+          measure directly would overstate recognized revenue with amounts
+          from invoices that were never finalized.
+
+metrics:
+  - name: recognized_revenue
+    description: >
+      Revenue recognized under accrual accounting: subscription revenue
+      spread evenly across the days of its service period, plus
+      services revenue recognized on the invoice issue date, in USD.
+      Includes open, paid and uncollectible invoices (recognition
+      depends on delivering the service, not on collecting cash --
+      uncollectible amounts are a bad-debt/collections concern, not a
+      revenue-recognition one). Excludes draft invoices (not yet
+      finalized), void invoices (canceled, never valid), tax, and
+      Relay's internal/test accounts. Distinct from billings (recognized
+      when earned, not when invoiced) and from cash_collected (recognized
+      when earned, not when paid).
+    type: simple
+    type_params:
+      measure: recognized_amount_usd
+    filter: |
+      {{ Dimension('recognized_invoice_month_id__status') }} in ('open', 'paid', 'uncollectible')
+      and not {{ Dimension('account_id__is_internal') }}

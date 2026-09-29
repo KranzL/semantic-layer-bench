@@ -1,0 +1,54 @@
+version: 2
+
+semantic_models:
+  - name: sem_credit_notes
+    description: >
+      One row per credit note issued against an invoice (fct_credit_notes). Credit notes
+      reduce what a customer owes or refund amounts already paid; they are issued for
+      goodwill, billing corrections, downgrade adjustments, or service credits.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: invoice_id
+        type: foreign
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar date the credit note was issued.
+      - name: reason
+        type: categorical
+        description: >
+          Why the credit note was issued: "goodwill" (discretionary customer-retention
+          credit), "billing_error" (correcting an incorrect charge), "downgrade_adjustment"
+          (pro-rated credit for a mid-cycle plan downgrade), or "service_credit" (credit
+          for a service issue, e.g. an SLA breach).
+    measures:
+      - name: refund_amount
+        description: >
+          Total credit note value in USD, converted at the credit note's issue-date fx
+          rate. Includes all reasons (goodwill, billing corrections, downgrade
+          adjustments, service credits); slice by reason to isolate a specific type.
+          Excludes Relay's internal/test accounts.
+        agg: sum
+        expr: amount_minor / power(10, minor_unit_exponent) * usd_per_unit
+
+metrics:
+  - name: refunds
+    description: >
+      Refunds and credits issued to customers, in USD: the total value of all credit
+      notes, regardless of reason (goodwill, billing corrections, downgrade adjustments,
+      service credits). Does not net against cash_collected or billings; excludes Relay's
+      internal/test accounts. Slice by issued_date (metric_time), reason, and via joined
+      account dimensions by segment, region and billing_currency.
+    type: simple
+    type_params:
+      measure: refund_amount
+    filter: |
+      {{ Dimension('account_id__is_internal') }} = false

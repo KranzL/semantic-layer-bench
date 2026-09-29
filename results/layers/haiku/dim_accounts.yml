@@ -1,0 +1,43 @@
+semantic_model:
+  name: dim_accounts
+  description: Customer accounts dimension. Includes all accounts in the system with their metadata.
+  node_relation:
+    schema_name: marts
+    alias: dim_accounts
+  measures:
+    - name: count_accounts
+      description: Number of accounts
+      agg: count
+  dimensions:
+    - name: account_id
+      description: Unique account identifier
+      type: categorical
+      primary_key: true
+    - name: account_name
+      description: Customer account name
+      type: categorical
+    - name: created_date
+      description: Date account was created
+      type: time
+      time_granularity: day
+    - name: region
+      description: Geographic region of account (NA, EMEA, APAC)
+      type: categorical
+    - name: segment
+      description: Customer segment (SMB, MidMarket, Enterprise)
+      type: categorical
+    - name: country
+      description: Country where account is located
+      type: categorical
+    - name: billing_currency
+      description: Currency for billing (USD, EUR, GBP, JPY)
+      type: categorical
+    - name: is_internal
+      description: Whether account is internal (Relay employee or test account)
+      type: categorical
+    - name: is_deleted
+      description: Whether account has been deleted
+      type: categorical
+    - name: parent_account_id
+      description: Parent account ID for multi-entity hierarchies
+      type: categorical

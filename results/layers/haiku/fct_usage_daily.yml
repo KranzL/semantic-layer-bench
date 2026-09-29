@@ -1,0 +1,33 @@
+semantic_model:
+  name: fct_usage_daily
+  description: >
+    Daily usage fact table. One row per account per event type per day.
+    Aggregated from granular usage events. Includes all billable and non-billable usage.
+  node_relation:
+    schema_name: marts
+    alias: fct_usage_daily
+  defaults:
+    agg_time_dimension: usage_date
+  measures:
+    - name: billable_usage
+      description: Total billable usage quantity. Sum across all events and dates.
+      agg: sum
+      expr: quantity
+    - name: count_usage_records
+      description: Count of usage records
+      agg: count
+  dimensions:
+    - name: usage_date
+      description: Date of usage
+      type: time
+      time_granularity: day
+    - name: account_id
+      description: Customer account using the service
+      type: categorical
+      role: foreign_key
+    - name: event_type
+      description: Type of usage event (api_call, health_check, etc.)
+      type: categorical
+    - name: quantity
+      description: Quantity of usage
+      type: numeric

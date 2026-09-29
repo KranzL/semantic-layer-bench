@@ -1,0 +1,27 @@
+version: 2
+
+entities:
+  - name: account
+    type: primary
+    expr: account_id
+    description: A customer account in Relay
+
+  - name: subscription
+    type: primary
+    expr: subscription_id
+    description: A subscription to a Relay plan
+
+  - name: invoice
+    type: primary
+    expr: invoice_id
+    description: A billing invoice sent to an account
+
+  - name: payment
+    type: primary
+    expr: payment_id
+    description: A payment received for an invoice
+
+  - name: opportunity
+    type: primary
+    expr: opportunity_id
+    description: A sales opportunity

@@ -1,0 +1,76 @@
+version: 2
+
+semantic_models:
+  - name: sem_subscription_economics
+    description: >
+      One row per subscription per calendar month-end snapshot (int_subscription_economics,
+      built from fct_subscription_months), showing the subscription's status, plan and
+      normalized monthly recurring amount as of that month end. Internal/test accounts are
+      already excluded in int_subscription_economics. This is a periodic snapshot: summing
+      mrr_usd within a single month_end gives a correct point-in-time total; it is not
+      meant to be summed across months.
+    model: ref('int_subscription_economics')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: plan_id
+        type: foreign
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: month
+        description: >
+          Last calendar day of the month being snapshotted. Data covers 2023-01-31 through
+          2025-06-30, matching fct_subscription_months.
+      - name: status
+        type: categorical
+        description: >
+          Subscription version status effective at month_end: "trialing" (in free trial,
+          not yet paying), "active" (paying, in good standing), "past_due" (paying, most
+          recent payment failed but subscription has not been canceled) or "canceled"
+          (subscription has ended). "active" and "past_due" are treated as paying for MRR
+          and customer-count purposes; "trialing" and "canceled" are not.
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue: seats x seat price x (1 - discount_pct) for the
+          subscription version effective at month_end, converted from the subscription's
+          billing currency to USD at that month-end's fx rate, and normalized to a
+          monthly amount (annual-billed plans are divided by 12). Only includes
+          subscription versions with status "active" or "past_due"; excludes "trialing"
+          subscriptions (not yet paying) and "canceled" subscriptions, and excludes all
+          one-time/services invoice revenue (see sem_billing_invoices and
+          sem_revenue_recognition for those). Excludes Relay's internal/test accounts.
+        agg: sum
+        expr: case when status in ('active', 'past_due') then mrr_amount_usd end
+
+metrics:
+  - name: mrr
+    description: >
+      Monthly Recurring Revenue: the normalized monthly value of all active and past-due
+      subscription seats, in USD, as of the selected month end. Excludes trial and
+      canceled subscriptions, one-time services revenue, and Relay's internal/test
+      accounts. Slice by month_end (metric_time), and via joined dimensions by plan
+      (plan_name, plan_family, billing_interval), account (segment, region,
+      billing_currency), and subscription status.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    description: >
+      Annual Recurring Revenue: MRR annualized (mrr x 12). Inherits every inclusion and
+      exclusion from the mrr metric (active/past-due subscriptions only, no trials, no
+      canceled subscriptions, no services revenue, no internal accounts). This is a
+      run-rate figure derived from the current month's MRR, not a sum of actual billings
+      collected over a trailing year.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr

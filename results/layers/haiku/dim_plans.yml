@@ -1,0 +1,23 @@
+semantic_model:
+  name: dim_plans
+  description: Subscription plans dimension. Includes all available plans with their pricing and billing intervals.
+  node_relation:
+    schema_name: marts
+    alias: dim_plans
+  dimensions:
+    - name: plan_id
+      description: Unique plan identifier
+      type: categorical
+      primary_key: true
+    - name: plan_name
+      description: Display name of the plan (Starter, Growth, Scale, Enterprise)
+      type: categorical
+    - name: plan_family
+      description: Plan family/tier (Starter, Growth, Scale, Enterprise)
+      type: categorical
+    - name: billing_interval
+      description: Billing interval (month or year)
+      type: categorical
+    - name: list_price_usd_minor
+      description: List price in USD (in minor currency units, e.g., cents)
+      type: numeric

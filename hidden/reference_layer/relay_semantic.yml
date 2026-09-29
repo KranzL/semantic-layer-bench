@@ -1,0 +1,465 @@
+semantic_models:
+  - name: accounts
+    description: One row per Relay account. Internal accounts are Relay employee and QA accounts. Deleted accounts are merged duplicates. Both are excluded from every business metric.
+    model: ref('dim_accounts')
+    defaults:
+      agg_time_dimension: created_date
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+      - name: parent_account
+        type: foreign
+        expr: parent_account_id
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: segment
+        type: categorical
+      - name: region
+        type: categorical
+      - name: country
+        type: categorical
+      - name: billing_currency
+        type: categorical
+      - name: is_internal
+        type: categorical
+      - name: is_deleted
+        type: categorical
+    measures:
+      - name: account_count
+        agg: count_distinct
+        expr: account_id
+
+  - name: subscription_months
+    description: One row per subscription per calendar month end, holding the subscription version in effect on that day. Money is in minor units of the subscription currency (JPY has 0 decimals, others 2); usd_per_unit is the month-end FX rate. Paying statuses are active and past_due; trialing and canceled are not paying.
+    model: ref('fct_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_id || '|' || cast(month_end as varchar)
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: plan
+        type: foreign
+        expr: plan_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+      - name: billing_interval
+        type: categorical
+      - name: currency
+        type: categorical
+    measures:
+      - name: mrr_usd
+        description: Seats x unit price x (1 - discount), divided by 12 for annual plans, converted from minor units to USD at the month-end rate. Semi-additive over time; take the latest month end in a period.
+        agg: sum
+        expr: "seats * unit_price_minor * (1 - discount_pct) / pow(10, minor_unit_exponent) / case when billing_interval = 'year' then 12 else 1 end * usd_per_unit"
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: subscribed_accounts
+        agg: count_distinct
+        expr: account_id
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+  - name: plans
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+    dimensions:
+      - name: plan_name
+        type: categorical
+      - name: plan_family
+        type: categorical
+
+  - name: customer_months
+    description: One row per external, non-deleted account per month end with whether it was paying at that month end, at the previous month end, and at any earlier month end. Used for logo churn and new customers.
+    model: ref('customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        type: primary
+        expr: account_id || '|' || cast(month_end as varchar)
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: churned_customers
+        agg: sum
+        expr: case when was_paying_prior_month_end and not is_paying then 1 else 0 end
+      - name: customers_at_prior_month_end
+        agg: sum
+        expr: case when was_paying_prior_month_end then 1 else 0 end
+      - name: new_customer_count
+        agg: sum
+        expr: case when is_new_customer then 1 else 0 end
+
+  - name: invoices
+    description: One row per invoice. Amounts are in minor units of the invoice currency; usd_per_unit is the issue-date FX rate. Billings exclude tax and exclude void and draft invoices. A voided invoice is usually reissued as a new invoice.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+      - name: invoice_type
+        type: categorical
+      - name: currency
+        type: categorical
+    measures:
+      - name: billings_usd
+        agg: sum
+        expr: (subtotal_minor - discount_minor) / pow(10, minor_unit_exponent) * usd_per_unit
+      - name: tax_usd
+        agg: sum
+        expr: tax_minor / pow(10, minor_unit_exponent) * usd_per_unit
+      - name: invoice_count
+        agg: count
+        expr: invoice_id
+
+  - name: revenue_recognition
+    description: Recognized revenue per invoice per calendar month. Subscription invoices are spread evenly per day over period_start to period_end (end exclusive); services invoices are recognized on their issue date. Converted at the invoice issue-date rate.
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: invoice_month
+        type: primary
+        expr: invoice_id || '|' || cast(recognized_month as varchar)
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+      - name: status
+        type: categorical
+      - name: invoice_type
+        type: categorical
+    measures:
+      - name: recognized_revenue_usd
+        agg: sum
+        expr: recognized_amount_minor / pow(10, minor_unit_exponent) * usd_per_unit
+
+  - name: payments
+    description: Payment attempts. Only succeeded payments are cash. Converted at the received-date rate.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+      - name: method
+        type: categorical
+    measures:
+      - name: payments_usd
+        agg: sum
+        expr: amount_minor / pow(10, minor_unit_exponent) * usd_per_unit
+
+  - name: credit_notes
+    description: Refunds issued as credit notes, dated by issue date, converted at the issue-date rate.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: reason
+        type: categorical
+    measures:
+      - name: refunds_usd
+        agg: sum
+        expr: amount_minor / pow(10, minor_unit_exponent) * usd_per_unit
+
+  - name: usage_daily
+    description: Daily usage per account and event type. Only api_call events are billable; health_check events are system traffic.
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: account_id || '|' || cast(usage_date as varchar) || '|' || event_type
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: event_type
+        type: categorical
+    measures:
+      - name: usage_quantity
+        agg: sum
+        expr: quantity
+
+  - name: sales_reps
+    model: ref('dim_sales_reps')
+    entities:
+      - name: rep
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_name
+        type: categorical
+      - name: team
+        type: categorical
+      - name: region
+        type: categorical
+
+  - name: opportunities
+    description: Sales opportunities in USD, dated by close date. Open opportunities have not closed.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: rep
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: stage
+        type: categorical
+      - name: opportunity_type
+        type: categorical
+    measures:
+      - name: opportunity_amount_usd
+        agg: sum
+        expr: amount_usd
+      - name: opportunity_count
+        agg: count
+        expr: opportunity_id
+
+metrics:
+  - name: mrr
+    label: MRR (USD)
+    description: Monthly recurring revenue at a month end from paying subscriptions (active or past_due) of external, non-deleted accounts. For a period longer than a month, the value at the last month end in the period.
+    type: simple
+    type_params:
+      measure: mrr_usd
+    filter: |
+      {{ Dimension('subscription_month__status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: arr
+    label: ARR (USD)
+    description: MRR x 12.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying customers
+    description: External, non-deleted accounts with at least one active or past_due subscription at the month end. Subsidiaries count separately from their parent.
+    type: simple
+    type_params:
+      measure: subscribed_accounts
+    filter: |
+      {{ Dimension('subscription_month__status') }} in ('active', 'past_due')
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: arpa
+    label: ARPA (USD)
+    description: MRR per paying customer at a month end.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+
+  - name: logo_churn
+    label: Churned customers
+    description: Accounts that were paying customers at the previous month end and are not paying at this month end.
+    type: simple
+    type_params:
+      measure: churned_customers
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: Churned customers divided by paying customers at the previous month end.
+    type: ratio
+    type_params:
+      numerator:
+        name: logo_churn
+      denominator:
+        name: customers_at_prior_month_end_metric
+
+  - name: new_customers
+    label: New customers
+    description: Accounts paying at this month end that were not paying at any earlier month end. Over a longer period, the sum of the monthly counts.
+    type: simple
+    type_params:
+      measure: new_customer_count
+
+  - name: customers_at_prior_month_end_metric
+    label: Paying customers at the previous month end
+    type: simple
+    type_params:
+      measure: customers_at_prior_month_end
+
+  - name: billings
+    label: Billings (USD)
+    description: Invoice subtotal minus discount, excluding tax, for invoices that are not void or draft, from external, non-deleted accounts, by issue date.
+    type: simple
+    type_params:
+      measure: billings_usd
+    filter: |
+      {{ Dimension('invoice__status') }} not in ('void', 'draft')
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: recognized_revenue
+    label: Recognized revenue (USD)
+    description: Revenue recognized in each month from non-void, non-draft invoices of external, non-deleted accounts.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+    filter: |
+      {{ Dimension('invoice_month__status') }} not in ('void', 'draft')
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: cash_collected
+    label: Cash collected (USD)
+    description: Succeeded payments from external, non-deleted accounts by received date.
+    type: simple
+    type_params:
+      measure: payments_usd
+    filter: |
+      {{ Dimension('payment__status') }} = 'succeeded'
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: refunds
+    label: Refunds (USD)
+    description: Credit notes issued to external, non-deleted accounts by issue date.
+    type: simple
+    type_params:
+      measure: refunds_usd
+    filter: |
+      {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: billable_api_calls
+    label: Billable API calls
+    description: Usage quantity of api_call events for external, non-deleted accounts. health_check events are excluded.
+    type: simple
+    type_params:
+      measure: usage_quantity
+    filter: |
+      {{ Dimension('usage_day__event_type') }} = 'api_call'
+      and {{ Dimension('account__is_internal') }} = false
+      and {{ Dimension('account__is_deleted') }} = false
+
+  - name: bookings
+    label: Bookings (USD)
+    description: Amount of closed_won opportunities by close date.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+
+  - name: new_bookings
+    label: New bookings (USD)
+    description: Bookings from opportunities of type new.
+    type: simple
+    type_params:
+      measure: opportunity_amount_usd
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+      and {{ Dimension('opportunity__opportunity_type') }} = 'new'
+
+  - name: won_opportunities
+    type: simple
+    label: Won opportunities
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} = 'closed_won'
+
+  - name: closed_opportunities
+    type: simple
+    label: Closed opportunities
+    type_params:
+      measure: opportunity_count
+    filter: |
+      {{ Dimension('opportunity__stage') }} in ('closed_won', 'closed_lost')
+
+  - name: win_rate
+    label: Win rate
+    description: Closed won divided by closed won plus closed lost, by close date. Open opportunities are excluded.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities

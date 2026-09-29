@@ -1,0 +1,50 @@
+semantic_models:
+  - name: sem_credit_notes
+    description: >
+      One row per credit note issued against an invoice. Amounts are
+      converted to USD using the fx rate as of the date the credit note was
+      issued. The source data does not distinguish a credit note that was
+      paid out to the customer as a cash refund from one that was only
+      applied to reduce an outstanding invoice balance, so this model and
+      the refunds metric cover both.
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note_id
+        type: primary
+      - name: account_id
+        type: foreign
+      - name: invoice_id
+        type: foreign
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The calendar date the credit note was issued.
+      - name: reason
+        type: categorical
+        description: "Why the credit was issued: billing_error (correction of a billing mistake), downgrade_adjustment (proration credit for a mid-cycle downgrade), goodwill (discretionary customer-retention credit) or service_credit (SLA/outage credit)."
+      - name: currency
+        type: categorical
+        description: "The credit note's currency (matches the invoice it was applied to). Dollar measures on this model are already converted to USD."
+    measures:
+      - name: credit_note_amount_usd
+        agg: sum
+        expr: amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: The credit note amount in USD, for every credit note regardless of account.
+
+metrics:
+  - name: refunds
+    description: >
+      Total value of credit notes issued to customers, in USD, across
+      all reasons (billing corrections, downgrade proration, goodwill
+      and service credits). Excludes Relay's internal/test accounts.
+      Slice by reason to separate true goodwill/service refunds from
+      billing corrections and downgrade proration.
+    type: simple
+    type_params:
+      measure: credit_note_amount_usd
+    filter: |
+      not {{ Dimension('account_id__is_internal') }}

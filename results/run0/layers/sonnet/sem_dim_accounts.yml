@@ -1,0 +1,62 @@
+semantic_models:
+  - name: sem_dim_accounts
+    description: >
+      One row per customer account (company). Includes both currently active
+      and canceled/deleted accounts, and includes Relay's own internal/test
+      accounts (flagged via is_internal) so that they can be explicitly
+      excluded by metrics or analyzed separately. This is a dimension-only
+      semantic model with no measures; it exists to supply account
+      attributes (segment, region, country, currency, internal flag) to
+      metrics defined on other semantic models via the account_id join key.
+    model: ref('dim_accounts')
+    defaults:
+      agg_time_dimension: created_date
+    entities:
+      - name: account_id
+        type: primary
+      - name: parent_account_id
+        type: foreign
+        expr: parent_account_id
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: The calendar day the account record was created in the billing system.
+      - name: account_name
+        type: categorical
+        description: The customer's company name as recorded on the account.
+      - name: country
+        type: categorical
+        description: The ISO country of the account's billing address.
+      - name: region
+        type: categorical
+        description: "Relay's sales/reporting region for the account: NA, EMEA, APAC or LATAM."
+      - name: segment
+        type: categorical
+        description: "Customer size segment: SMB, MidMarket or Enterprise, based on company size at signup."
+      - name: billing_currency
+        type: categorical
+        description: >
+          The currency the account is billed in (USD, EUR, GBP or JPY).
+          Individual subscriptions carry their own currency, which is
+          usually but not necessarily the same as this account-level
+          default.
+      - name: is_internal
+        type: categorical
+        description: >
+          True for Relay's own internal, demo or test accounts. These
+          accounts have real subscriptions and invoices in the source
+          systems but are not paying customers and must be excluded from
+          customer-facing and revenue metrics such as MRR, ARR, paying
+          customers, billings, recognized revenue, cash collected and
+          billable usage.
+      - name: is_deleted
+        type: categorical
+        description: >
+          True if the account has a deleted_at timestamp (the account record
+          has been removed or merged in the source CRM/billing system).
+          Deleted accounts are not excluded from historical revenue and
+          usage metrics, since the activity occurred while the account was
+          live; this flag is provided so deleted accounts can be filtered
+          out of point-in-time or prospective analyses if needed.

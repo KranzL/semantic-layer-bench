@@ -1,0 +1,278 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: One row per issued invoice. Includes subscription and services invoices of external, non-deleted accounts in every status (paid, open, uncollectible, draft, void). Excludes internal test and demo accounts and deleted accounts. The billed_usd column holds the pre-tax invoice amount (subtotal less discount) in USD for billable invoices and is zero for draft and void invoices.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: row_key
+        description: Unique key for one invoice. Includes the invoice id. Used only as the row grain.
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the invoice was issued. Includes every issue date from 2023-01-15 through 2025-06-30. Excludes nothing.
+      - name: period_start
+        type: time
+        type_params:
+          time_granularity: day
+        description: First day of the service period the invoice covers. Includes the period start of every invoice. Excludes nothing.
+      - name: period_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Last day of the service period the invoice covers. Includes the period end of every invoice. Excludes nothing.
+      - name: invoice_id
+        type: categorical
+        description: Invoice identifier. Includes one value per invoice. Excludes nothing.
+      - name: invoice_number
+        type: categorical
+        description: Human-readable invoice number. Includes one value per invoice. Excludes nothing.
+      - name: invoice_type
+        type: categorical
+        description: Invoice line-of-business type (subscription or services). Includes both types. Services invoices are one-time and have no subscription.
+      - name: invoice_status
+        type: categorical
+        description: Invoice status (paid, open, uncollectible, draft, void). Includes all five statuses. Billings count paid, open, and uncollectible and exclude draft and void.
+      - name: currency
+        type: categorical
+        description: Invoice transaction currency (USD, EUR, GBP, JPY). Includes the currency the invoice was issued in. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Billed account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Billed account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record, which can differ from the invoice transaction currency. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+    measures:
+      - name: billings_usd
+        description: Sum of pre-tax invoiced amounts in USD at issue-date FX. Includes subscription and services invoices with status paid, open, or uncollectible for external, non-deleted accounts. Excludes draft and void invoices, taxes, internal test accounts, and deleted accounts. Gross of credit notes and refunds.
+        agg: sum
+        expr: billed_usd
+
+  - name: revenue_schedule
+    description: One row per invoice per calendar month in which revenue is recognized. Includes subscription invoices spread daily across their service period and services invoices recognized in full at issue, for external, non-deleted accounts in every status. Excludes internal test and demo accounts and deleted accounts. The recognized_usd column holds recognized pre-tax revenue in USD and is zero for draft and void invoices.
+    model: ref('sem_revenue')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_row
+        type: primary
+        expr: row_key
+        description: Unique key for one invoice in one recognized month. Includes the invoice id and the recognized month. Used only as the row grain.
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: First day of the calendar month in which revenue is recognized. Includes every month from 2023-01 through 2026-06, since annual invoices recognize past the issue window. Excludes nothing.
+      - name: invoice_id
+        type: categorical
+        description: Source invoice identifier. Includes one value per invoice, repeated across its recognized months. Excludes nothing.
+      - name: invoice_type
+        type: categorical
+        description: Source invoice type (subscription or services). Includes both types. Subscription revenue is spread over the service period and services revenue is recognized at issue.
+      - name: invoice_status
+        type: categorical
+        description: Source invoice status (paid, open, uncollectible, draft, void). Includes all five statuses. Recognized revenue counts paid, open, and uncollectible and excludes draft and void.
+      - name: currency
+        type: categorical
+        description: Source invoice transaction currency (USD, EUR, GBP, JPY). Includes the invoice currency. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Revenue account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Revenue account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+    measures:
+      - name: recognized_revenue_usd
+        description: Sum of recognized pre-tax revenue in USD at invoice issue-date FX. Includes subscription revenue spread over service periods and services revenue at issue for invoices with status paid, open, or uncollectible for external, non-deleted accounts. Excludes draft and void invoices, taxes, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: recognized_usd
+
+  - name: payments
+    description: One row per payment attempt. Includes succeeded and failed card, ACH, and wire payments against invoices of external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts. The collected_usd column holds the collected amount including tax in USD for succeeded payments and is zero for failed payments.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: row_key
+        description: Unique key for one payment attempt. Includes the payment id. Used only as the row grain.
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the payment was received or attempted. Includes every date from 2023-01-20 through 2025-06-30. Excludes nothing.
+      - name: payment_id
+        type: categorical
+        description: Payment identifier. Includes one value per payment attempt. Excludes nothing.
+      - name: invoice_id
+        type: categorical
+        description: Invoice the payment was applied to. Includes the paid invoice id. Excludes nothing.
+      - name: payment_status
+        type: categorical
+        description: Payment outcome (succeeded or failed). Includes both outcomes. Cash collected counts succeeded only and failed-payment metrics count failed only.
+      - name: payment_method
+        type: categorical
+        description: Payment rail (card, ach, or wire). Includes all three methods. Excludes nothing.
+      - name: currency
+        type: categorical
+        description: Payment transaction currency (USD, EUR, GBP, JPY). Includes the currency the payment was made in. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Paying account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Paying account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+    measures:
+      - name: cash_collected_usd
+        description: Sum of succeeded payment amounts in USD at receipt-date FX, including tax as collected. Includes succeeded card, ACH, and wire payments of external, non-deleted accounts. Excludes failed payments, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: collected_usd
+      - name: failed_payments_count
+        description: Count of distinct failed payment attempts. Includes failed card, ACH, and wire attempts of external, non-deleted accounts. Excludes succeeded payments, internal test accounts, and deleted accounts.
+        agg: count_distinct
+        expr: failed_payment_id
+      - name: failed_payment_amount_usd
+        description: Sum of failed payment attempt amounts in USD at receipt-date FX. Includes failed card, ACH, and wire attempts of external, non-deleted accounts. Excludes succeeded payments, internal test accounts, and deleted accounts.
+        agg: sum
+        expr: failed_usd
+
+  - name: credit_notes
+    description: One row per credit note issued against a paid subscription invoice. Includes all four credit reasons (billing_error, downgrade_adjustment, service_credit, goodwill) for external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts. The refund_usd column holds the credited amount in USD at issue-date FX.
+    model: ref('sem_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: row_key
+        description: Unique key for one credit note. Includes the credit note id. Used only as the row grain.
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued. Includes every date from 2023-04-04 through 2025-06-30. Excludes nothing.
+      - name: credit_note_id
+        type: categorical
+        description: Credit note identifier. Includes one value per credit note. Excludes nothing.
+      - name: invoice_id
+        type: categorical
+        description: Credited invoice identifier. Includes the invoice the credit was applied to. Excludes nothing.
+      - name: credit_reason
+        type: categorical
+        description: Credit reason (billing_error, downgrade_adjustment, service_credit, goodwill). Includes all four reasons in the refunds metric. Excludes nothing.
+      - name: currency
+        type: categorical
+        description: Credit note transaction currency (USD, EUR, GBP, JPY). Includes the currency the credit was issued in. Excludes nothing.
+      - name: account_id
+        type: categorical
+        description: Credited account identifier. Includes only external, non-deleted accounts. Excludes internal test and demo accounts and deleted accounts.
+      - name: account_name
+        type: categorical
+        description: Credited account display name. Includes only external, non-deleted accounts. Excludes internal test and demo accounts.
+      - name: segment
+        type: categorical
+        description: Account size segment (SMB, MidMarket, Enterprise). Includes the segment of external, non-deleted accounts. Excludes internal test accounts.
+      - name: region
+        type: categorical
+        description: Account sales region (NA, EMEA, APAC, LATAM). Includes the region of external, non-deleted accounts. Excludes internal test accounts.
+      - name: country
+        type: categorical
+        description: Account country code. Includes the country of external, non-deleted accounts. Excludes internal test accounts.
+      - name: billing_currency
+        type: categorical
+        description: Account-level billing currency. Includes the currency on the account record. Excludes nothing.
+      - name: parent_account_id
+        type: categorical
+        description: Parent account for rollups when this account is a child account. Includes the parent id for child accounts and is null for standalone accounts. Excludes nothing.
+    measures:
+      - name: refunds_usd
+        description: Sum of credited amounts in USD at issue-date FX. Includes all four credit reasons for external, non-deleted accounts. Excludes internal test accounts and deleted accounts.
+        agg: sum
+        expr: refund_usd
+
+metrics:
+  - name: billings
+    description: Pre-tax invoiced amount in USD at issue-date FX. Includes subscription and services invoices with status paid, open, or uncollectible for external, non-deleted accounts. Excludes draft and void invoices, taxes, credit notes, internal test accounts, and deleted accounts. Gross of refunds.
+    type: simple
+    type_params:
+      measure: billings_usd
+  - name: recognized_revenue
+    description: Pre-tax earned revenue in USD at issue-date FX. Includes subscription revenue spread over service periods and services revenue at issue for invoices with status paid, open, or uncollectible for external, non-deleted accounts. Excludes draft and void invoices, taxes, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+  - name: cash_collected
+    description: Cash received in USD at receipt-date FX, including tax as collected. Includes succeeded card, ACH, and wire payments of external, non-deleted accounts. Excludes failed payments, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: cash_collected_usd
+  - name: failed_payments
+    description: Count of failed payment attempts. Includes failed card, ACH, and wire attempts of external, non-deleted accounts. Excludes succeeded payments, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: failed_payments_count
+  - name: failed_payment_amount
+    description: Failed payment attempt amount in USD at receipt-date FX. Includes failed card, ACH, and wire attempts of external, non-deleted accounts. Excludes succeeded payments, internal test accounts, and deleted accounts.
+    type: simple
+    type_params:
+      measure: failed_payment_amount_usd
+  - name: refunds
+    description: Credited and refunded amount in USD at issue-date FX. Includes all credit reasons (billing_error, downgrade_adjustment, service_credit, goodwill) for external, non-deleted accounts. Excludes internal test accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: refunds_usd

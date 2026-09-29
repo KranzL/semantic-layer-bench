@@ -1,0 +1,122 @@
+version: 2
+
+models:
+  - name: fct_subscription_months
+    description: Subscription monthly metrics. MRR and subscription tracking at monthly granularity. One row per subscription per month. Includes active subscriptions as of month end. Excludes accounts marked as deleted or internal.
+    columns:
+      - name: subscription_id
+      - name: month_end
+      - name: account_id
+      - name: plan_id
+      - name: status
+      - name: currency
+      - name: seats
+      - name: unit_price_minor
+      - name: discount_pct
+      - name: usd_per_unit
+
+  - name: dim_accounts
+    description: Customer accounts dimension. Includes all accounts with their metadata (segment, region, currency). Excludes deleted and internal accounts.
+    columns:
+      - name: account_id
+      - name: account_name
+      - name: created_date
+      - name: region
+      - name: segment
+      - name: country
+      - name: billing_currency
+      - name: is_deleted
+
+  - name: dim_plans
+    description: Subscription plans dimension. All available plans with pricing and billing intervals (monthly, annual).
+    columns:
+      - name: plan_id
+      - name: plan_name
+      - name: plan_family
+      - name: billing_interval
+      - name: list_price_usd_minor
+
+  - name: dim_sales_reps
+    description: Sales representatives dimension. All sales team members with team and regional assignments.
+    columns:
+      - name: rep_id
+      - name: rep_name
+      - name: team
+      - name: region
+      - name: hired_at
+
+  - name: fct_invoices
+    description: Invoice fact table. All invoices (subscription, services, manual). Billings and revenue tracking. Excludes invoices for deleted or internal accounts.
+    columns:
+      - name: invoice_id
+      - name: issued_date
+      - name: account_id
+      - name: invoice_type
+      - name: status
+      - name: total_minor
+      - name: currency
+      - name: usd_per_unit
+
+  - name: fct_payments
+    description: Payment fact table. All payments received. Cash collection tracking. Only includes succeeded payments. Excludes payments for deleted or internal accounts.
+    columns:
+      - name: payment_id
+      - name: received_date
+      - name: account_id
+      - name: invoice_id
+      - name: amount_minor
+      - name: currency
+      - name: status
+      - name: method
+      - name: usd_per_unit
+
+  - name: fct_credit_notes
+    description: Credit notes fact table. Refunds and adjustments. Represents refunds, service credits, and billing adjustments. Excludes credit notes for deleted or internal accounts.
+    columns:
+      - name: credit_note_id
+      - name: issued_date
+      - name: account_id
+      - name: amount_minor
+      - name: currency
+      - name: reason
+      - name: usd_per_unit
+
+  - name: fct_revenue_recognition
+    description: Revenue recognition fact table. Monthly recognized revenue. Revenue spread daily for subscriptions, at invoice date for services. Excludes revenue for deleted or internal accounts.
+    columns:
+      - name: invoice_id
+      - name: recognized_month
+      - name: account_id
+      - name: invoice_type
+      - name: recognized_amount_minor
+      - name: currency
+      - name: usd_per_unit
+
+  - name: fct_usage_daily
+    description: Daily usage fact table. Billable and non-billable usage tracking. One row per account per event type per day. Aggregated from granular usage events.
+    columns:
+      - name: usage_date
+      - name: account_id
+      - name: event_type
+      - name: quantity
+
+  - name: fct_opportunities
+    description: Sales opportunities fact table. New customer and expansion opportunities. One row per opportunity. Includes all stages (open, closed_won, closed_lost). Bookings are closed won opportunities.
+    columns:
+      - name: opportunity_id
+      - name: created_date
+      - name: account_id
+      - name: rep_id
+      - name: opportunity_type
+      - name: stage
+      - name: close_date
+      - name: amount_usd
+
+  - name: sm_customer_cohorts
+    description: Customer cohort tracking. Customer acquisition, retention, and churn. One row per account per month. Tracks new customers, paying customers, and churn events.
+    columns:
+      - name: account_id
+      - name: month_end
+      - name: is_paying
+      - name: churned_this_month
+      - name: is_new_customer

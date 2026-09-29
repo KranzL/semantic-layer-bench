@@ -1,0 +1,27 @@
+semantic_models:
+  - name: sem_dim_sales_reps
+    description: >
+      One row per sales rep. Dimension-only semantic model with no measures;
+      supplies sales team and region attributes to opportunity/bookings
+      metrics via the rep_id join key. Includes reps regardless of whether
+      they are still employed (hired_at is retained but there is no
+      termination date in the source data).
+    model: ref('dim_sales_reps')
+    entities:
+      - name: rep_id
+        type: primary
+    dimensions:
+      - name: hired_at
+        type: time
+        type_params:
+          time_granularity: day
+        description: The date the rep was hired.
+      - name: rep_name
+        type: categorical
+        description: The sales rep's display name.
+      - name: team
+        type: categorical
+        description: "The sales team the rep belongs to, e.g. \"NA Sales\" or \"EMEA Sales\". Each team maps to one region."
+      - name: region
+        type: categorical
+        description: "The sales region the rep covers: NA, EMEA, APAC or LATAM."

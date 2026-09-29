@@ -1,0 +1,92 @@
+version: 2
+
+semantic_models:
+  - name: revenue_recognition
+    label: Revenue recognition schedule
+    description: >
+      Revenue by month of service, one row per invoice per month (built from
+      marts.fct_revenue_recognition by sem_revenue_recognition). Each subscription
+      invoice's net amount (subtotal minus discount, before tax) is spread evenly
+      by day across its service period; services invoices are recognized in full
+      in their issue month. Amounts are in USD at the invoice issue-date FX rate.
+      Includes: open, paid and uncollectible invoices of external accounts
+      (is_recognizable). Future months hold the deferred revenue schedule of
+      annual invoices already issued.
+      Excludes: draft and void invoices (rows kept with is_recognizable = false for
+      audit), internal accounts, sales tax, and usage that has not been invoiced.
+    model: ref('sem_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_recognition_row
+        type: primary
+        expr: revenue_recognition_id
+        description: Surrogate key invoice_id | recognized_month.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice whose revenue is being recognized.
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: Subscription billed; null for services invoices.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (top-level account).
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan billed; null for services invoices.
+      - name: calendar_date
+        type: foreign
+        expr: recognized_month
+        description: First day of the recognition month, for fiscal calendar attributes.
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: Month in which the revenue is earned (first day of month).
+      - name: invoice_issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Issue date of the underlying invoice.
+      - name: invoice_type
+        type: categorical
+        description: subscription or services.
+      - name: invoice_status
+        type: categorical
+        description: "Current status of the underlying invoice: draft, open, paid, uncollectible or void."
+      - name: is_recognizable
+        type: categorical
+        description: True for rows from open, paid or uncollectible invoices; only these count as recognized revenue.
+      - name: billing_interval
+        type: categorical
+        description: month or year for subscription invoices; null for services.
+      - name: plan_family
+        type: categorical
+        description: Product tier; null for services invoices.
+      - name: currency
+        type: categorical
+        description: Invoice currency.
+    measures:
+      - name: recognized_revenue_usd
+        label: Recognized revenue (USD)
+        agg: sum
+        expr: case when is_recognizable then recognized_amount_usd else 0 end
+        description: >
+          Revenue earned in the month, in USD: the daily-prorated net amount of
+          open, paid and uncollectible subscription invoices plus services
+          invoices in their issue month, at the invoice issue-date FX rate.
+          Excludes draft and void invoices, tax and internal accounts.
+      - name: recognized_revenue_local
+        label: Recognized revenue (local currency)
+        agg: sum
+        expr: case when is_recognizable then recognized_amount_local else 0 end
+        description: Recognized revenue in the invoice currency. Only meaningful when grouped or filtered by currency.
