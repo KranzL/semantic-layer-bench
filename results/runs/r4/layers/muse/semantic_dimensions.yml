@@ -1,0 +1,85 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: One row per customer account. Includes paying, trial, churned, internal QA and soft-deleted accounts. All standard metrics exclude internal and soft-deleted accounts.
+    model: ref('dim_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: The customer account. Includes internal and deleted accounts; every standard metric filters them out.
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Customer account display name. Includes internal QA accounts unless filtered.
+      - name: segment
+        type: categorical
+        description: Sales segment of the account (Enterprise, MidMarket, SMB). Set for every account including internal and deleted ones.
+      - name: region
+        type: categorical
+        description: Customer geography of the account (NA, EMEA, APAC, LATAM). This is where the customer sits, not the sales team region.
+      - name: country
+        type: categorical
+        description: Two letter country code of the account.
+      - name: billing_currency
+        type: categorical
+        description: Currency the account is billed in (USD, EUR, GBP, JPY). Money metrics are converted to USD; this dimension shows the original billing currency.
+      - name: is_internal
+        type: categorical
+        description: True for Relay internal and QA accounts. All standard metrics exclude these accounts.
+      - name: is_deleted
+        type: categorical
+        description: True for soft-deleted accounts. All standard metrics exclude these accounts.
+      - name: has_parent_account
+        type: categorical
+        expr: parent_account_id is not null
+        description: True for child accounts attached to a parent account. Metrics count each account separately and never roll child accounts up into the parent.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the account record was created. Includes internal and deleted accounts.
+
+  - name: plans
+    description: One row per price plan. Subscription metrics join here for plan slicing; services invoices have no plan.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: The price plan on a subscription version or subscription invoice. Services invoices carry no plan.
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Plan display name such as Starter, Growth Annual or Enterprise. Includes monthly and annual variants as separate plans.
+      - name: plan_family
+        type: categorical
+        description: Plan family grouping monthly and annual variants (Starter, Growth, Scale, Enterprise).
+      - name: billing_interval
+        type: categorical
+        description: Plan billing interval (month or year). Annual plan prices are divided by 12 in MRR and ARR.
+
+  - name: sales_reps
+    description: One row per sales representative. Opportunity metrics join here for sales team slicing.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: The sales representative who owns an opportunity. Every opportunity has exactly one owner.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Sales representative display name.
+      - name: team
+        type: categorical
+        description: Sales team of the representative (NA Sales, EMEA Sales, APAC Sales, LATAM Sales). This is the selling team, not the customer geography.
+      - name: region
+        type: categorical
+        description: Home region of the sales team. This is the selling region, not the customer geography.
+      - name: hired_at
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the representative was hired. Includes all representatives regardless of attribution window.

@@ -1,0 +1,66 @@
+version: 2
+
+semantic_models:
+  - name: subscriptions
+    model: ref('fct_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    description: Monthly subscription state for each account, used to calculate MRR, ARR, customer counts and churn metrics.
+    entities:
+      - name: subscription_id
+        type: primary
+        description: Unique subscription identifier
+      - name: account_id
+        type: foreign
+        role: account
+      - name: plan_id
+        type: foreign
+        role: plan
+    measures:
+      - name: seats
+        description: Number of seats in the subscription at this month end
+        agg: sum
+      - name: mrr_usd
+        description: Monthly recurring revenue in USD, calculated as (unit_price_minor * (1 - discount_pct) * seats / 10^exponent) * usd_per_unit for monthly subscriptions, or annual / 12 for yearly subscriptions
+        agg: sum
+        expr: |
+          case
+            when billing_interval = 'month' then (unit_price_minor * (1 - discount_pct) * seats / power(10, minor_unit_exponent)) * usd_per_unit
+            when billing_interval = 'year' then (unit_price_minor * (1 - discount_pct) * seats / power(10, minor_unit_exponent) / 12) * usd_per_unit
+            else 0
+          end
+      - name: mrr_local
+        description: Monthly recurring revenue in local currency, calculated as (unit_price_minor * (1 - discount_pct) * seats / 10^exponent) for monthly subscriptions, or annual / 12 for yearly subscriptions
+        agg: sum
+        expr: |
+          case
+            when billing_interval = 'month' then (unit_price_minor * (1 - discount_pct) * seats / power(10, minor_unit_exponent))
+            when billing_interval = 'year' then (unit_price_minor * (1 - discount_pct) * seats / power(10, minor_unit_exponent) / 12)
+            else 0
+          end
+      - name: active_count
+        description: Flag indicating if subscription is active (status = 'active'), 1 if active, 0 otherwise
+        agg: sum
+        expr: case when status = 'active' then 1 else 0 end
+      - name: paying_count
+        description: Flag indicating if subscription is paying (active or past_due), 1 if paying, 0 otherwise
+        agg: sum
+        expr: case when status in ('active', 'past_due') then 1 else 0 end
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Last day of the month for this subscription state
+      - name: version_id
+        type: categorical
+        description: Version ID for this subscription configuration
+      - name: status
+        type: categorical
+        description: Status of the subscription (active, canceled, trialing, etc.)
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the plan (month or year)
+      - name: currency
+        type: categorical
+        description: Billing currency of the subscription

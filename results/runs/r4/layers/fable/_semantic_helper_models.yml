@@ -1,0 +1,124 @@
+version: 2
+
+models:
+  - name: sem_accounts
+    description: >
+      Reportable billing accounts, one row per account. Excludes Relay's own internal accounts
+      (is_internal: QA, demo and sandbox accounts) and soft-deleted accounts (deleted_at set),
+      and accounts whose parent is internal or deleted. Maps each account to its customer
+      (logo): the parent account when parent_account_id is set, otherwise the account itself.
+    columns:
+      - name: account_id
+        description: Billing account identifier. Primary key.
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: Account id of the customer (logo) this account rolls up to.
+        data_tests: [not_null]
+
+  - name: sem_customers
+    description: >
+      One row per customer (logo): the top-level reportable accounts. Child accounts are not
+      rows here; they roll up to their parent. Attributes are those of the top-level account.
+    columns:
+      - name: customer_id
+        description: Account id of the top-level account. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_subscription_months
+    description: >
+      Month-end snapshot of every subscription of reportable accounts, one row per
+      subscription per month-end (2023-01-31 to 2025-06-30), with MRR in USD. MRR is
+      seats x unit price x (1 - discount), divided by 12 for annual plans, scaled by the
+      currency's minor-unit exponent and converted at the month-end FX rate. MRR and paying
+      seats are zero unless the subscription status is active or past_due.
+    columns:
+      - name: subscription_month_id
+        description: Subscription id and month-end concatenated. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_customer_months
+    description: >
+      One row per customer (logo) per month-end from the customer's first paying month-end
+      through 2025-06-30, flagging whether the customer was new, retained, reactivated or
+      churned in that month, based on paying state at consecutive month-ends.
+    columns:
+      - name: customer_month_id
+        description: Customer id and month-end concatenated. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_invoices
+    description: >
+      Invoices of reportable accounts, one row per invoice in any status, with amounts in USD
+      at the issue-date FX rate and the plan the subscription was on when invoiced.
+    columns:
+      - name: invoice_id
+        description: Invoice identifier. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_revenue_recognition
+    description: >
+      Revenue recognition schedule of reportable accounts, one row per invoice per recognition
+      month, in USD at the invoice's issue-date FX rate. Subscription invoices are spread
+      evenly by day over the service period; services invoices are recognized on issue.
+    columns:
+      - name: revenue_schedule_id
+        description: Invoice id and recognition month concatenated. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_payments
+    description: >
+      Payment attempts of reportable accounts, one row per attempt (succeeded or failed), with
+      amounts in USD at the received-date FX rate.
+    columns:
+      - name: payment_id
+        description: Payment attempt identifier. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_credit_notes
+    description: >
+      Credit notes of reportable accounts, one row per credit note, with amounts in USD at the
+      credit note's issue-date FX rate.
+    columns:
+      - name: credit_note_id
+        description: Credit note identifier. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_usage_daily
+    description: >
+      Daily usage quantity of reportable accounts, one row per account, day and event type,
+      flagged as billable (api_call) or not (health_check).
+    columns:
+      - name: usage_daily_id
+        description: Account id, usage date and event type concatenated. Primary key.
+        data_tests: [unique, not_null]
+
+  - name: sem_fiscal_time_spine
+    description: >
+      Daily time spine carrying Relay's fiscal calendar, used for the fiscal_year and
+      fiscal_quarter time granularities. The fiscal year starts on 1 February and is named for
+      the calendar year in which it ends (FY2026 runs 2025-02-01 to 2026-01-31).
+    time_spine:
+      standard_granularity_column: date_day
+      custom_granularities:
+        - name: fiscal_year
+          column_name: fiscal_year
+        - name: fiscal_quarter
+          column_name: fiscal_quarter
+    columns:
+      - name: date_day
+        description: Calendar date. Primary key.
+        granularity: day
+        data_tests: [unique, not_null]
+      - name: fiscal_year
+        description: First day of the fiscal year the date falls in (always a 1 February).
+      - name: fiscal_quarter
+        description: First day of the fiscal quarter the date falls in (1 February, 1 May, 1 August or 1 November).
+
+  - name: sem_opportunities
+    description: >
+      Sales opportunities of reportable accounts, one row per opportunity in any stage, with
+      amounts in USD.
+    columns:
+      - name: opportunity_id
+        description: Opportunity identifier. Primary key.
+        data_tests: [unique, not_null]

@@ -1,0 +1,54 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: created_date
+    description: Sales opportunities for new business and expansions, used to calculate bookings, new bookings, and win rates. Includes both new business and expansion opportunities.
+    entities:
+      - name: opportunity_id
+        type: primary
+        description: Unique opportunity identifier
+      - name: account_id
+        type: foreign
+        role: account
+      - name: rep_id
+        type: foreign
+        role: sales_rep
+    measures:
+      - name: bookings_usd
+        description: Booked amount in USD (only for closed_won opportunities)
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+      - name: booking_count
+        description: Count of bookings (closed_won opportunities)
+        agg: count_distinct
+        expr: opportunity_id
+      - name: new_booking_count
+        description: Count of new bookings (closed_won new business opportunities)
+        agg: count_distinct
+        expr: opportunity_id
+      - name: opportunity_count
+        description: Total count of opportunities
+        agg: count_distinct
+        expr: opportunity_id
+      - name: won_flag
+        description: Flag indicating if opportunity was won (stage = 'closed_won'), 1 if won, 0 otherwise
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+    dimensions:
+      - name: opportunity_type
+        type: categorical
+        description: Type of opportunity (new, expansion, renewal, etc.)
+      - name: stage
+        type: categorical
+        description: Sales stage (prospecting, qualified, proposal, negotiation, closed_won, closed_lost)
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date opportunity was created
+      - name: close_date
+        type: categorical
+        description: Date opportunity was closed (either won or lost)

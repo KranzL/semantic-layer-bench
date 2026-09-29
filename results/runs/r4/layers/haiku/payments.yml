@@ -1,0 +1,42 @@
+version: 2
+
+semantic_models:
+  - name: payments
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: received_date
+    description: Payments received from customers, used to calculate cash collected. Only includes successful payments.
+    entities:
+      - name: payment_id
+        type: primary
+        description: Unique payment identifier
+      - name: account_id
+        type: foreign
+        role: account
+      - name: invoice_id
+        type: foreign
+        role: invoice
+    measures:
+      - name: amount_usd
+        description: Payment amount in USD
+        agg: sum
+        expr: (amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: payment_count
+        description: Count of distinct payments
+        agg: count_distinct
+        expr: payment_id
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date payment was received
+      - name: status
+        type: categorical
+        description: Payment status (succeeded, failed, pending)
+      - name: method
+        type: categorical
+        description: Payment method (wire, credit_card, ach, etc.)
+      - name: currency
+        type: categorical
+        description: Payment currency

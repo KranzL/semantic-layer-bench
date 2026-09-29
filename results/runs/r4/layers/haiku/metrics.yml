@@ -1,0 +1,161 @@
+version: 2
+
+metrics:
+  # Subscription/MRR Metrics
+  - name: mrr
+    description: Monthly Recurring Revenue in USD for active subscriptions.
+    type: simple
+    label: MRR
+    type_params:
+      measure:
+        name: mrr_usd
+
+  - name: mrr_local
+    description: Monthly Recurring Revenue in local currency for active subscriptions.
+    type: simple
+    label: MRR (Local)
+    type_params:
+      measure:
+        name: mrr_local
+
+  - name: active_subscriptions
+    description: Count of unique active subscriptions.
+    type: simple
+    label: Active Subscriptions
+    type_params:
+      measure:
+        name: active_count
+
+  - name: paying_customers
+    description: Count of unique accounts with paying subscriptions.
+    type: simple
+    label: Paying Customers
+    type_params:
+      measure:
+        name: paying_count
+
+  - name: total_seats
+    description: Total number of seats across all subscriptions.
+    type: simple
+    label: Total Seats
+    type_params:
+      measure:
+        name: seats
+
+  # Invoice Metrics
+  - name: billings
+    description: Total invoiced amount in USD (subtotal - discount).
+    type: simple
+    label: Billings
+    type_params:
+      measure:
+        name: invoiced_amount_usd
+
+  - name: total_discounts
+    description: Total discount amount in USD applied to invoices.
+    type: simple
+    label: Total Discounts
+    type_params:
+      measure:
+        name: discount_usd
+
+  - name: total_tax
+    description: Total tax amount in USD collected from invoices.
+    type: simple
+    label: Total Tax
+    type_params:
+      measure:
+        name: tax_usd
+
+  - name: paid_invoices
+    description: Count of paid invoices.
+    type: simple
+    label: Paid Invoices
+    type_params:
+      measure:
+        name: paid_count
+
+  # Revenue Recognition Metrics
+  - name: recognized_revenue
+    description: Total recognized revenue in USD (accrual basis for subscriptions).
+    type: simple
+    label: Recognized Revenue
+    type_params:
+      measure:
+        name: recognized_revenue_usd
+
+  # Payment Metrics
+  - name: cash_collected
+    description: Total cash collected in USD from successful payments.
+    type: simple
+    label: Cash Collected
+    type_params:
+      measure:
+        name: amount_usd
+
+  - name: payment_count
+    description: Count of successful payments received.
+    type: simple
+    label: Payment Count
+    type_params:
+      measure:
+        name: payment_count
+
+  # Refund Metrics
+  - name: refunds
+    description: Total refund amount in USD from credit notes.
+    type: simple
+    label: Refunds
+    type_params:
+      measure:
+        name: refund_amount_usd
+
+  # Opportunity/Sales Metrics
+  - name: bookings_usd
+    description: Total value in USD of closed-won opportunities.
+    type: simple
+    label: Bookings
+    type_params:
+      measure:
+        name: bookings_usd
+
+  - name: booking_count
+    description: Count of closed-won opportunities.
+    type: simple
+    label: Booking Count
+    type_params:
+      measure:
+        name: booking_count
+
+  - name: new_booking_count
+    description: Count of closed-won new business opportunities.
+    type: simple
+    label: New Booking Count
+    type_params:
+      measure:
+        name: new_booking_count
+
+  - name: opportunity_count
+    description: Total count of opportunities.
+    type: simple
+    label: Opportunity Count
+    type_params:
+      measure:
+        name: opportunity_count
+
+  - name: won_opportunities
+    description: Count of won opportunities.
+    type: simple
+    label: Won Opportunities
+    type_params:
+      measure:
+        name: won_flag
+
+  # Usage Metrics
+  - name: total_usage
+    description: Total usage quantity across all event types.
+    type: simple
+    label: Total Usage
+    type_params:
+      measure:
+        name: quantity

@@ -1,0 +1,23 @@
+version: 2
+
+semantic_models:
+  - name: plans
+    model: ref('dim_plans')
+    description: Plan dimension table with plan attributes including billing interval and list pricing.
+    entities:
+      - name: plan_id
+        type: primary
+        description: Unique plan identifier
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Human-readable plan name
+      - name: plan_family
+        type: categorical
+        description: Plan family or tier (Starter, Growth, Enterprise, etc.)
+      - name: billing_interval
+        type: categorical
+        description: Billing interval for the plan (month or year)
+      - name: list_price_usd_minor
+        type: categorical
+        description: List price in USD minor units

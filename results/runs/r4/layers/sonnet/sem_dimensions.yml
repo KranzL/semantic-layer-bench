@@ -1,0 +1,73 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: >
+      External customer accounts, one row per account. Internal accounts (is_internal = true, e.g. Relay's own
+      test and employee accounts) are excluded, so every metric that joins to it is external-customers only.
+      Deleted accounts are kept because their historical revenue, billings and churn are real. Segment, region,
+      country and billing currency are those of the root customer: for a child account they are the parent
+      account's values, for any other account they are its own.
+    model: ref('sem_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: Billing account id (ACC-nnnnn). Child accounts have their own id but report the parent's attributes.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Root customer id. Equals the parent account id for child accounts and the account's own id otherwise.
+    dimensions:
+      - name: segment
+        type: categorical
+        expr: segment
+        description: Sales segment of the root customer (SMB, MidMarket or Enterprise). Child accounts inherit the parent's segment.
+      - name: region
+        type: categorical
+        expr: region
+        description: Sales region of the root customer (NA, EMEA, APAC or LATAM). Child accounts inherit the parent's region. Not the sales rep's region.
+      - name: country
+        type: categorical
+        expr: country
+        description: Country of the root customer. Child accounts inherit the parent's country.
+      - name: billing_currency
+        type: categorical
+        expr: billing_currency
+        description: Account-level billing currency (USD, EUR, GBP or JPY) of the root customer. Use the currency dimension of a metric's own semantic model to slice by the currency the transaction was actually made in.
+      - name: is_deleted
+        type: categorical
+        expr: is_deleted
+        description: True when the account has been deleted (its subscriptions are canceled). Deleted accounts are included in metrics unless filtered out on this dimension.
+
+  - name: sales_reps
+    description: >
+      Sales representatives, one row per rep. Used to slice opportunity metrics (bookings, win rate) by the rep who
+      owns the deal, the rep's team and the rep's region.
+    model: ref('dim_sales_reps')
+    defaults:
+      agg_time_dimension: hired_date
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: Sales rep id.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        expr: rep_name
+        description: Full name of the sales rep who owns the opportunity.
+      - name: team
+        type: categorical
+        expr: team
+        description: Sales team of the rep (NA Sales, EMEA Sales, APAC Sales or LATAM Sales). This is the rep's team, not the customer's region.
+      - name: region
+        type: categorical
+        expr: region
+        description: Region the sales rep covers. May differ from the customer's region on the account dimension.
+      - name: hired_date
+        type: time
+        expr: hired_at
+        type_params:
+          time_granularity: day
+        description: Date the rep was hired. Only used as the time axis of this model; opportunity metrics are timed by close date.

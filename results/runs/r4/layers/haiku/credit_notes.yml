@@ -1,0 +1,35 @@
+version: 2
+
+semantic_models:
+  - name: credit_notes
+    model: ref('fct_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    description: Credit notes issued to customers, representing refunds or adjustments. Used to calculate net billings and refund amounts.
+    entities:
+      - name: credit_note_id
+        type: primary
+        description: Unique credit note identifier
+      - name: account_id
+        type: foreign
+        role: account
+      - name: invoice_id
+        type: foreign
+        role: invoice
+    measures:
+      - name: refund_amount_usd
+        description: Refund amount in USD
+        agg: sum
+        expr: (amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued
+      - name: reason
+        type: categorical
+        description: Reason for credit note (refund, discount_adjustment, etc.)
+      - name: currency
+        type: categorical
+        description: Credit note currency

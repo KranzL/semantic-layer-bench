@@ -1,0 +1,67 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    description: Invoices issued to customers, used to calculate billings, discounts, and taxes. Includes both subscription and services invoices.
+    entities:
+      - name: invoice_id
+        type: primary
+        description: Unique invoice identifier
+      - name: account_id
+        type: foreign
+        role: account
+      - name: subscription_id
+        type: foreign
+        role: subscription
+    measures:
+      - name: subtotal_usd
+        description: Subtotal in USD before discount
+        agg: sum
+        expr: (subtotal_minor / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: discount_usd
+        description: Discount amount in USD
+        agg: sum
+        expr: (discount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: tax_usd
+        description: Tax amount in USD
+        agg: sum
+        expr: (tax_minor / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: total_usd
+        description: Total invoice amount in USD
+        agg: sum
+        expr: (total_minor / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: invoiced_amount_usd
+        description: Invoiced amount in USD (subtotal - discount in USD)
+        agg: sum
+        expr: ((subtotal_minor - discount_minor) / power(10, minor_unit_exponent)) * usd_per_unit
+      - name: paid_count
+        description: Flag indicating if invoice is paid (status = 'paid'), 1 if paid, 0 otherwise
+        agg: sum
+        expr: case when status = 'paid' then 1 else 0 end
+    dimensions:
+      - name: invoice_number
+        type: categorical
+        description: Human-readable invoice number
+      - name: invoice_type
+        type: categorical
+        description: Type of invoice (subscription or services)
+      - name: status
+        type: categorical
+        description: Invoice status (draft, issued, paid, overdue, cancelled)
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the invoice was issued
+      - name: period_start
+        type: categorical
+        description: Start date of the billing period
+      - name: period_end
+        type: categorical
+        description: End date of the billing period
+      - name: currency
+        type: categorical
+        description: Invoice currency

@@ -1,0 +1,306 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      Month-end snapshot of subscriptions, one row per subscription per month-end from January
+      2023 through June 2025. It is the source for MRR, ARR, paying customers and ARPA. A
+      subscription is paying when its status at month-end is active or past_due; trialing and
+      canceled subscriptions carry zero MRR. Excludes Relay's internal accounts and
+      soft-deleted accounts. All amounts are in USD at the month-end FX rate. Values are
+      point-in-time balances, so they are never summed across months.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: snapshot_month
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_month_id
+        description: One subscription at one month-end.
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+        description: The subscription. An account can hold more than one subscription over time.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: The billing account that holds the subscription.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo) the billing account rolls up to.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: The plan the subscription was on at the month-end.
+    dimensions:
+      - name: snapshot_month
+        type: time
+        expr: month_end
+        type_params:
+          time_granularity: day
+        description: >
+          Month-end date of the snapshot (the last day of each calendar month). Values
+          describe the state on that day. Group by month or coarser; when grouped by quarter,
+          year or fiscal period, the last month-end in the period is used. Days that are not
+          a month-end have no data.
+      - name: subscription_status
+        type: categorical
+        expr: status
+        description: >
+          Subscription status at the month-end - trialing (free trial, not paying), active,
+          past_due (payment overdue but service continues, still counted as paying) or
+          canceled (ended, not paying).
+      - name: is_paying
+        type: categorical
+        description: True when the status at month-end is active or past_due; false for trialing and canceled.
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the subscription's plan at the month-end - month or year.
+      - name: currency
+        type: categorical
+        description: Currency the subscription is priced in (USD, EUR, GBP or JPY). Metric values are converted to USD.
+      - name: is_discounted
+        type: categorical
+        description: True when the subscription has a contractual discount greater than zero at the month-end.
+    measures:
+      - name: mrr_usd
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month-end from active and past_due
+          subscriptions, net of discounts, with annual plans divided by 12. Excludes trials,
+          canceled subscriptions, tax, services and usage.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_customer_count
+        agg: count_distinct
+        expr: case when is_paying then customer_id end
+        description: >
+          Distinct customers (logos) with at least one active or past_due subscription at
+          month-end. Child accounts count once under their parent.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_subscription_count
+        agg: count_distinct
+        expr: case when is_paying then subscription_id end
+        description: Distinct subscriptions with status active or past_due at month-end. Excludes trialing and canceled.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: trialing_subscription_count
+        agg: count_distinct
+        expr: case when status = 'trialing' then subscription_id end
+        description: Distinct subscriptions in a free trial at month-end. These carry no MRR.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_seat_count
+        agg: sum
+        expr: paying_seats
+        description: Seats on active and past_due subscriptions at month-end. Excludes seats on trialing and canceled subscriptions.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      Customer lifecycle by month, one row per customer (logo) per month-end from the
+      customer's first paying month-end through June 2025. It is the source for new
+      customers, logo churn and churn rate. A customer is paying at a month-end when any of
+      its accounts has an active or past_due subscription. State is compared between
+      consecutive month-ends, so a customer that starts and cancels within the same calendar
+      month never appears. Excludes Relay's internal accounts and soft-deleted accounts.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: snapshot_month
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+        description: One customer at one month-end.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo).
+    dimensions:
+      - name: snapshot_month
+        type: time
+        expr: month_end
+        type_params:
+          time_granularity: day
+        description: >
+          Month in which the lifecycle event is counted, stored as the last day of that
+          calendar month. New, reactivated and churned customers are counted in the month by
+          whose end their paying state had changed. Group by month or coarser.
+      - name: customer_month_status
+        type: categorical
+        description: >
+          Lifecycle state of the customer in the month - new (first month-end ever paying),
+          retained (paying at this and the previous month-end), reactivated (paying again
+          after a gap), churned (paying at the previous month-end, not at this one) or
+          inactive (not paying at either).
+      - name: first_paying_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: Calendar month of the customer's first paying month-end; the acquisition cohort.
+    measures:
+      - name: new_customer_count
+        agg: sum
+        expr: is_new_customer
+        description: >
+          Customers paying at a month-end for the first time ever. Excludes customers
+          returning after churn (see reactivated) and customers still in trial.
+      - name: reactivated_customer_count
+        agg: sum
+        expr: is_reactivated_customer
+        description: Customers paying at this month-end who were not paying at the previous one but had paid in an earlier month.
+      - name: churned_customer_count
+        agg: sum
+        expr: is_churned_customer
+        description: >
+          Customers paying at the previous month-end with no active or past_due subscription
+          at this month-end. Downgrades and seat reductions are not churn. A customer that
+          churns, returns and churns again is counted each time.
+      - name: customer_count_at_period_start
+        agg: sum
+        expr: is_customer_at_start_of_month
+        description: >
+          Customers that were paying at the month-end before the period began; the
+          denominator of logo churn rate. For quarters and years the first month of the
+          period is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: min
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD at month-end: seats x contracted price per seat, net of
+      discounts, for subscriptions that are active or past_due, with annual plans divided by
+      12. Converted to USD at the month-end FX rate. Excludes trialing and canceled
+      subscriptions, tax, one-off services, usage, internal accounts and deleted accounts.
+      A balance, not a flow - over a quarter or year it is the value at the last month-end.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD at month-end, defined as MRR x 12. Same inclusions and
+      exclusions as MRR. It is a run-rate, not revenue billed or recognized over a year.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of distinct customers (logos) with at least one active or past_due subscription
+      at month-end. Child accounts count once under their parent. Excludes customers that are
+      only trialing or canceled, internal accounts and deleted accounts. A balance - over a
+      quarter or year it is the count at the last month-end. When sliced by plan or currency
+      a customer with several subscriptions can appear in more than one group.
+    type: simple
+    type_params:
+      measure: paying_customer_count
+
+  - name: arpa
+    label: ARPA
+    description: >
+      Average revenue per account in USD per month: MRR divided by paying customers at the
+      same month-end. Uses customers (logos) as the denominator, so child accounts are
+      combined with their parent. Excludes everything MRR excludes.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+
+  - name: paying_subscriptions
+    label: Paying subscriptions
+    description: >
+      Number of subscriptions with status active or past_due at month-end. Excludes trialing
+      and canceled subscriptions, internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: paying_subscription_count
+
+  - name: trialing_subscriptions
+    label: Trialing subscriptions
+    description: >
+      Number of subscriptions in a free trial at month-end. Trials carry no MRR and are not
+      paying customers. Excludes internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: trialing_subscription_count
+
+  - name: paying_seats
+    label: Paying seats
+    description: >
+      Number of seats on active and past_due subscriptions at month-end. Excludes seats on
+      trialing and canceled subscriptions, internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: paying_seat_count
+
+  - name: new_customers
+    label: New customers
+    description: >
+      Number of customers (logos) that became paying for the first time ever, counted in the
+      month at whose end they were first paying. Excludes customers returning after churn
+      (reactivated customers), trials that have not converted, new child accounts of an
+      existing customer, internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: new_customer_count
+
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: >
+      Number of customers (logos) that were paying at this month-end, were not paying at the
+      previous one, and had paid in an earlier month. These are win-backs and are not
+      included in new customers.
+    type: simple
+    type_params:
+      measure: reactivated_customer_count
+
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Logo churn: number of customers (logos) that were paying at the previous month-end and
+      had no active or past_due subscription at this month-end. Downgrades, seat reductions
+      and the cancellation of one of several subscriptions are not churn. Excludes trials
+      that never converted, internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: churned_customer_count
+
+  - name: customers_at_period_start
+    label: Customers at start of period
+    description: >
+      Number of customers (logos) that were paying at the month-end immediately before the
+      period; the denominator of logo churn rate. Excludes customers acquired during the
+      period.
+    type: simple
+    type_params:
+      measure: customer_count_at_period_start
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Share of customers lost in the period: churned customers divided by paying customers at
+      the start of the period, as a fraction (0.03 means 3%). Monthly by default; for a
+      quarter or year it is all churn in the period over customers at the start of the
+      period. Counts logos, not revenue, and excludes customers acquired within the period
+      from the denominator.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: customers_at_period_start

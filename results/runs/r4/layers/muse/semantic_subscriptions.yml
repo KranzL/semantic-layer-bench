@@ -1,0 +1,161 @@
+version: 2
+
+semantic_models:
+  - name: subscriptions
+    description: One row per subscription per calendar month-end with monthly recurring revenue. Covers 2023-01-31 through 2025-06-30. Internal and soft-deleted accounts are excluded; trialing and canceled rows are present but carry zero MRR.
+    model: ref('sem_subscription_mrr')
+    defaults:
+      agg_time_dimension: month_end
+    primary_entity: subscription
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Owning customer account. Joins to the accounts model for segment, region and currency slicing.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Price plan of the subscription version active at month-end. Joins to the plans model.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Month-end snapshot date. Each subscription has one row per month from its first version through 2025-06-30.
+      - name: status
+        type: categorical
+        description: Subscription status at month-end (active, past_due, trialing, canceled). MRR and paying-customer metrics count active and past_due only.
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the month-end plan version (month or year). Annual prices are divided by 12 in MRR.
+      - name: currency
+        type: categorical
+        description: Subscription billing currency (USD, EUR, GBP, JPY). MRR is converted to USD at the month-end FX rate.
+      - name: is_paying
+        type: categorical
+        description: True when status is active or past_due at month-end. False for trialing and canceled rows, which carry zero MRR and are not paying customers.
+    measures:
+      - name: mrr_usd
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+        description: Month-end MRR in USD. Seats times unit price less discount, annual plans divided by 12, FX converted at month-end rates. Zero for trialing and canceled rows. Takes the latest month-end when aggregated above monthly grain.
+      - name: paying_seats
+        agg: sum
+        expr: paying_seats
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+        description: Seats on active and past_due subscriptions at month-end. Zero for trialing and canceled rows. Takes the latest month-end when aggregated above monthly grain.
+
+  - name: account_months
+    description: One row per account per calendar month with paying, new-customer and churn flags derived from consecutive month-end snapshots. Covers 2023-01-31 through 2025-06-30. Internal and soft-deleted accounts are excluded.
+    model: ref('sem_account_mrr_monthly')
+    defaults:
+      agg_time_dimension: month_end
+    primary_entity: account_month
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+        description: The customer account. Joins to the accounts model for segment, region and currency slicing.
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Month-end snapshot date. An account has rows from its first subscription month through 2025-06-30.
+      - name: is_paying
+        type: categorical
+        description: True when the account has at least one active or past_due subscription at month-end. False for trial-only and fully canceled months.
+      - name: is_new_customer
+        type: categorical
+        description: True in the first month the account ever has an active or past_due subscription. Accounts whose history starts in the first snapshot month, 2023-01, count as new then. Never true for trial-only accounts.
+      - name: is_churned
+        type: categorical
+        description: True when the account was paying at the previous month-end and has no active or past_due subscription at this month-end. Trial expirations that never converted do not count as churn.
+    measures:
+      - name: paying_accounts_monthly
+        agg: sum
+        expr: paying_flag
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+        description: Accounts with an active or past_due subscription at month-end. Excludes trial-only, canceled, internal and deleted accounts. Takes the latest month-end when aggregated above monthly grain.
+      - name: new_customer_accounts
+        agg: count_distinct
+        expr: new_account_id
+        description: Distinct accounts in their first paying month. Excludes trial starts that never convert, reactivations, internal and deleted accounts.
+      - name: churned_accounts
+        agg: count_distinct
+        expr: churned_account_id
+        description: Distinct accounts that were paying last month-end and are not paying this month-end. Excludes trial expirations, internal and deleted accounts.
+      - name: cohort_start_accounts
+        agg: count_distinct
+        expr: cohort_start_account_id
+        description: Distinct accounts that were paying at the previous month-end. This is the starting cohort for the logo churn rate.
+
+metrics:
+  - name: mrr
+    description: Monthly recurring revenue in USD at month-end. Includes active and past_due subscriptions, annual plans at one twelfth of contract value less discount, FX converted at month-end rates. Excludes trials, canceled subscriptions, services, tax, internal and deleted accounts. Read at monthly grain; coarser grains take the latest month-end.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    description: Annualized recurring revenue in USD, defined as MRR times 12. Includes and excludes exactly what MRR includes and excludes.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paying_customers
+    description: Distinct customer accounts with at least one active or past_due subscription at month-end. Excludes trial-only accounts, fully canceled accounts, internal and deleted accounts. Each account counts once no matter how many subscriptions it holds.
+    type: simple
+    type_params:
+      measure: paying_accounts_monthly
+
+  - name: paying_seats
+    description: Total seats on active and past_due subscriptions at month-end. Excludes trial and canceled seats, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: paying_seats
+
+  - name: arpa
+    description: Average revenue per account in USD per month, defined as MRR divided by paying customers at month-end. Excludes trial, canceled, internal and deleted accounts from both sides.
+    type: ratio
+    type_params:
+      numerator:
+        name: mrr
+      denominator:
+        name: paying_customers
+
+  - name: new_customers
+    description: Distinct accounts reaching their first active or past_due subscription in the month. Excludes trial starts that never convert, reactivations, internal and deleted accounts. Accounts present in the first snapshot month, 2023-01, count as new then.
+    type: simple
+    type_params:
+      measure: new_customer_accounts
+
+  - name: logo_churn
+    description: Distinct accounts that were paying at the previous month-end and have no active or past_due subscription at this month-end. Excludes trial expirations that never converted, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: churned_accounts
+
+  - name: customers_start_of_month
+    description: Distinct accounts that were paying at the previous month-end. This is the starting cohort of the logo churn rate. Excludes internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: cohort_start_accounts
+
+  - name: churn_rate
+    description: Logo churn rate for the month, defined as logo churn divided by customers at the start of the month. Excludes trial expirations, internal and deleted accounts. Undefined in the first snapshot month, 2023-01, which has no starting cohort.
+    type: ratio
+    type_params:
+      numerator:
+        name: logo_churn
+      denominator:
+        name: customers_start_of_month

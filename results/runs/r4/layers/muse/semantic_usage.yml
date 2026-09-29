@@ -1,0 +1,35 @@
+version: 2
+
+semantic_models:
+  - name: usage
+    description: One row per account per day per event type with the event quantity. Internal and soft-deleted accounts are excluded; health_check rows are present but carry zero billable usage.
+    model: ref('sem_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    primary_entity: usage
+    entities:
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Customer account generating the usage. Joins to the accounts model for segment, region and currency slicing.
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the usage occurred. Billable usage is attributed to this date.
+      - name: event_type
+        type: categorical
+        description: Usage event kind (api_call or health_check). Billable usage includes api_call only; health_check is a constant internal monitoring heartbeat of 288 events per day and is excluded.
+    measures:
+      - name: billable_usage_units
+        agg: sum
+        expr: billable_quantity
+        description: Sum of api_call event quantities. Zero for health_check rows.
+
+metrics:
+  - name: billable_usage
+    description: Billable usage events, defined as api_call quantities summed over the period. Excludes the health_check monitoring heartbeat, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: billable_usage_units

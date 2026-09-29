@@ -1,0 +1,229 @@
+version: 2
+
+semantic_models:
+  - name: usage_daily
+    description: >
+      Product usage, one row per account, day and event type. It is the source for billable
+      usage. Only api_call events are billable; health_check events are automated monitoring
+      pings (288 per account per day) and are never billable. Excludes Relay's internal
+      accounts and soft-deleted accounts. Quantities are event counts, not money.
+    model: ref('sem_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_daily_line
+        type: primary
+        expr: usage_daily_id
+        description: One account on one day for one event type.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: The billing account that generated the usage.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo) the account rolls up to.
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the usage occurred.
+      - name: event_type
+        type: categorical
+        description: Kind of usage event - api_call (billable) or health_check (automated monitoring, not billable).
+      - name: is_billable
+        type: categorical
+        description: True for api_call events; false for health_check events.
+    measures:
+      - name: billable_usage_quantity
+        agg: sum
+        expr: case when is_billable then quantity else 0 end
+        description: Number of api_call events. Excludes health_check events.
+      - name: total_usage_quantity
+        agg: sum
+        expr: quantity
+        description: Number of events of every type, billable api_call and non-billable health_check together.
+      - name: billable_usage_account_count
+        agg: count_distinct
+        expr: case when is_billable and quantity > 0 then account_id end
+        description: Distinct billing accounts with at least one api_call event in the period.
+
+  - name: opportunities
+    description: >
+      Sales opportunities, one row per opportunity in any stage (open, closed_won,
+      closed_lost), of type new (first sale to an account) or expansion (additional sale to
+      an existing account). It is the source for bookings and win rate. Reported on the close
+      date; for open opportunities that is the expected close date and can be in the future.
+      Excludes Relay's internal accounts and soft-deleted accounts. Amounts are annual
+      contract values in USD as entered by sales and are not invoiced or recognized amounts.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: The sales opportunity.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: The billing account the opportunity is with.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo) the account rolls up to.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: The sales representative who owns the opportunity.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was won or lost; for open opportunities, the expected close date.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created in the CRM.
+      - name: opportunity_type
+        type: categorical
+        description: new (first sale to an account) or expansion (additional seats or upgrade for an existing account).
+      - name: stage
+        type: categorical
+        description: Current stage - open (still in progress), closed_won or closed_lost.
+    measures:
+      - name: booking_amount_usd
+        agg: sum
+        expr: case when is_won then amount_usd else 0 end
+        description: Amount in USD of closed_won opportunities, new and expansion. Excludes open and closed_lost opportunities.
+      - name: new_booking_amount_usd
+        agg: sum
+        expr: case when is_won and opportunity_type = 'new' then amount_usd else 0 end
+        description: Amount in USD of closed_won opportunities of type new. Excludes expansion, open and closed_lost opportunities.
+      - name: expansion_booking_amount_usd
+        agg: sum
+        expr: case when is_won and opportunity_type = 'expansion' then amount_usd else 0 end
+        description: Amount in USD of closed_won opportunities of type expansion. Excludes new, open and closed_lost opportunities.
+      - name: won_opportunity_count
+        agg: sum
+        expr: case when is_won then 1 else 0 end
+        description: Number of closed_won opportunities, new and expansion.
+      - name: lost_opportunity_count
+        agg: sum
+        expr: case when stage = 'closed_lost' then 1 else 0 end
+        description: Number of closed_lost opportunities, new and expansion.
+      - name: closed_opportunity_count
+        agg: sum
+        expr: case when is_closed then 1 else 0 end
+        description: Number of opportunities that reached an outcome, closed_won plus closed_lost. Excludes open opportunities.
+      - name: open_pipeline_amount_usd
+        agg: sum
+        expr: case when stage = 'open' then amount_usd else 0 end
+        description: Amount in USD of opportunities still open, unweighted, dated by expected close date. Excludes closed opportunities.
+
+metrics:
+  - name: billable_usage
+    label: Billable usage
+    description: >
+      Number of billable usage events: api_call events, reported on the date they occurred.
+      Excludes health_check events (automated monitoring pings), internal accounts and deleted
+      accounts. A count of events, not a monetary amount.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+
+  - name: total_usage
+    label: Total usage
+    description: >
+      Number of usage events of every type, including non-billable health_check events. Use
+      billable usage for anything related to charging customers. Excludes internal accounts
+      and deleted accounts.
+    type: simple
+    type_params:
+      measure: total_usage_quantity
+
+  - name: accounts_with_billable_usage
+    label: Accounts with billable usage
+    description: >
+      Number of distinct billing accounts with at least one api_call event in the period.
+      Counts billing accounts, not customers, so parent and child accounts count separately.
+    type: simple
+    type_params:
+      measure: billable_usage_account_count
+
+  - name: bookings
+    label: Bookings
+    description: >
+      Total value in USD of opportunities closed as won, reported on the close date. Includes
+      both new and expansion opportunities. Excludes open and closed_lost opportunities,
+      internal accounts and deleted accounts. Amounts are as entered by sales in USD and are
+      not invoiced or recognized amounts.
+    type: simple
+    type_params:
+      measure: booking_amount_usd
+
+  - name: new_bookings
+    label: New bookings
+    description: >
+      Value in USD of closed_won opportunities of type new (first sale to an account),
+      reported on the close date. Excludes expansion bookings, open and closed_lost
+      opportunities, internal accounts and deleted accounts.
+    type: simple
+    type_params:
+      measure: new_booking_amount_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings
+    description: >
+      Value in USD of closed_won opportunities of type expansion (additional sale to an
+      existing account), reported on the close date. Excludes new bookings, open and
+      closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: expansion_booking_amount_usd
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Number of opportunities closed as won, new and expansion, reported on the close date.
+    type: simple
+    type_params:
+      measure: won_opportunity_count
+
+  - name: lost_opportunities
+    label: Lost opportunities
+    description: Number of opportunities closed as lost, new and expansion, reported on the close date.
+    type: simple
+    type_params:
+      measure: lost_opportunity_count
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Number of opportunities that reached an outcome (closed_won plus closed_lost), reported on the close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: closed_opportunity_count
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Share of closed opportunities that were won: closed_won divided by closed_won plus
+      closed_lost, as a fraction (0.5 means 50%), by close date. Counts opportunities, not
+      amounts. Open opportunities are excluded from both sides. Covers new and expansion
+      opportunities together; slice by opportunity type to separate them.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+
+  - name: open_pipeline
+    label: Open pipeline
+    description: >
+      Value in USD of opportunities still open, unweighted by probability, reported on the
+      expected close date. Reflects the pipeline as it stands today, not a historical
+      snapshot. Excludes won and lost opportunities.
+    type: simple
+    type_params:
+      measure: open_pipeline_amount_usd

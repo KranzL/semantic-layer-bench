@@ -1,0 +1,26 @@
+version: 2
+
+semantic_models:
+  - name: revenue_recognition
+    model: ref('fct_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    description: Recognized revenue by month for each invoice. Subscription revenue is recognized daily across the billing period, while services revenue is recognized on invoice issue date.
+    entities:
+      - name: invoice_id
+        type: primary
+        description: Unique invoice identifier
+      - name: account_id
+        type: foreign
+        role: account
+    measures:
+      - name: recognized_revenue_usd
+        description: Recognized revenue in USD
+        agg: sum
+        expr: (recognized_amount_minor / power(10, minor_unit_exponent)) * usd_per_unit
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: day
+        description: Month in which revenue was recognized (first day of month)

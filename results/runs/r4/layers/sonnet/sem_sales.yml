@@ -1,0 +1,138 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      One row per sales opportunity, new-business or expansion, in stages open, closed_won and closed_lost, with
+      amounts in USD. Timed by close date; for open opportunities the close date is the expected close date, so
+      they are excluded from every measure here. Measures cover closed opportunities only.
+    model: ref('fct_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity id.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account of the opportunity; joins to the accounts model for segment, region and country.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales rep; joins to the sales reps model for rep name, team and region.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity closed (won or lost); the expected close date while still open. Not the created date.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created. Not used to time the measures.
+      - name: opportunity_type
+        type: categorical
+        expr: opportunity_type
+        description: new for new-logo business, expansion for upsell to an existing customer.
+      - name: stage
+        type: categorical
+        expr: stage
+        description: open, closed_won or closed_lost. Measures only count closed_won and closed_lost.
+    measures:
+      - name: bookings_usd
+        description: USD amount of closed_won opportunities (new and expansion) closed in the period. Excludes open and closed_lost opportunities.
+        agg: sum
+        expr: case when stage = 'closed_won' then amount_usd else 0 end
+      - name: new_bookings_usd
+        description: USD amount of closed_won new-business opportunities closed in the period. Excludes expansion, open and closed_lost.
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then amount_usd else 0 end
+      - name: won_opportunities
+        description: Count of closed_won opportunities (new and expansion) closed in the period.
+        agg: sum
+        expr: case when stage = 'closed_won' then 1 else 0 end
+      - name: closed_opportunities
+        description: Count of closed opportunities (closed_won plus closed_lost) closed in the period. Open opportunities are excluded.
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+      - name: new_won_opportunities
+        description: Count of closed_won new-business opportunities closed in the period.
+        agg: sum
+        expr: case when stage = 'closed_won' and opportunity_type = 'new' then 1 else 0 end
+      - name: new_closed_opportunities
+        description: Count of closed (won or lost) new-business opportunities closed in the period. Excludes expansion and open.
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') and opportunity_type = 'new' then 1 else 0 end
+
+metrics:
+  - name: bookings
+    label: Bookings (USD)
+    description: >
+      USD amount of closed_won opportunities, new and expansion, timed by close date. Excludes open and
+      closed_lost opportunities. Sales pipeline value, not billings or revenue.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings (USD)
+    description: >
+      USD amount of closed_won new-business opportunities, timed by close date. Excludes expansion, open and
+      closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: won_opportunities
+    label: Won opportunities
+    description: Number of closed_won opportunities (new and expansion) closed in the period.
+    type: simple
+    type_params:
+      measure: won_opportunities
+
+  - name: closed_opportunities
+    label: Closed opportunities
+    description: Number of opportunities closed as won or lost in the period; the win_rate denominator. Excludes open.
+    type: simple
+    type_params:
+      measure: closed_opportunities
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Closed_won opportunities divided by closed (won plus lost) opportunities, new and expansion combined, by
+      close date. Open opportunities are excluded from both numerator and denominator. Group by opportunity_type
+      to separate new from expansion.
+    type: ratio
+    type_params:
+      numerator: won_opportunities
+      denominator: closed_opportunities
+
+  - name: new_business_win_rate
+    label: New-business win rate
+    description: >
+      Closed_won new-business opportunities divided by closed (won plus lost) new-business opportunities, by close
+      date. Excludes expansion and open opportunities.
+    type: ratio
+    type_params:
+      numerator:
+        name: new_won_opportunities_metric
+      denominator:
+        name: new_closed_opportunities_metric
+
+  - name: new_won_opportunities_metric
+    label: New-business won opportunities
+    description: Number of closed_won new-business opportunities closed in the period. Excludes expansion.
+    type: simple
+    type_params:
+      measure: new_won_opportunities
+
+  - name: new_closed_opportunities_metric
+    label: New-business closed opportunities
+    description: Number of new-business opportunities closed as won or lost in the period. Excludes expansion and open.
+    type: simple
+    type_params:
+      measure: new_closed_opportunities

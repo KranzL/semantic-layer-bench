@@ -1,0 +1,129 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: One row per sales opportunity with booking amounts in USD. Internal and soft-deleted accounts are excluded; open and lost opportunities are present but carry zero bookings.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: The sales opportunity. Includes new and expansion opportunities in open, closed_won and closed_lost stages.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Prospect or customer account. Joins to the accounts model for segment, region and currency slicing.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Owning sales representative. Joins to the sales reps model for team slicing.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Actual close date for closed opportunities and expected close date for open ones. Bookings, wins, losses and pipeline are all attributed to this date.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created. Informational only; no metric is attributed to this date.
+      - name: opportunity_type
+        type: categorical
+        description: Opportunity kind (new or expansion). Bookings include both; new bookings include new only.
+      - name: stage
+        type: categorical
+        description: Pipeline stage (open, closed_won, closed_lost). Bookings include closed_won only; win rate divides won by won plus lost; pipeline includes open only.
+    measures:
+      - name: bookings_usd
+        agg: sum
+        expr: bookings_usd
+        description: Sum of closed_won opportunity amounts in USD. Zero for open and lost opportunities.
+      - name: new_bookings_usd
+        agg: sum
+        expr: new_bookings_usd
+        description: Sum of closed_won new-business opportunity amounts in USD. Zero for expansion, open and lost opportunities.
+      - name: expansion_bookings_usd
+        agg: sum
+        expr: expansion_bookings_usd
+        description: Sum of closed_won expansion opportunity amounts in USD. Zero for new-business, open and lost opportunities.
+      - name: won_opportunities
+        agg: sum
+        expr: won_count
+        description: Count of closed_won opportunities.
+      - name: lost_opportunities
+        agg: sum
+        expr: lost_count
+        description: Count of closed_lost opportunities.
+      - name: closed_opportunities
+        agg: sum
+        expr: closed_count
+        description: Count of closed opportunities, won plus lost. Open opportunities are excluded.
+      - name: open_pipeline_usd
+        agg: sum
+        expr: open_pipeline_usd
+        description: Sum of open opportunity amounts in USD, dated by expected close date. Zero for closed opportunities.
+      - name: open_opportunities_count
+        agg: sum
+        expr: open_count
+        description: Count of open opportunities.
+
+metrics:
+  - name: bookings
+    description: Closed-won opportunity amounts in USD, attributed to the close date. Includes new and expansion bookings. Excludes open and lost opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    description: Closed-won new-business opportunity amounts in USD, attributed to the close date. Excludes expansion, open and lost opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: expansion_bookings
+    description: Closed-won expansion opportunity amounts in USD, attributed to the close date. Excludes new-business, open and lost opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+
+  - name: opportunities_won
+    description: Count of closed_won opportunities, attributed to the close date. Excludes open and lost opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: won_opportunities
+
+  - name: opportunities_lost
+    description: Count of closed_lost opportunities, attributed to the close date. Excludes open and won opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: lost_opportunities
+
+  - name: opportunities_closed
+    description: Count of closed opportunities, won plus lost, attributed to the close date. This is the denominator of the win rate. Excludes open opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: closed_opportunities
+
+  - name: open_pipeline
+    description: Open opportunity amounts in USD, attributed to the expected close date. Excludes closed opportunities, internal and deleted accounts. Point-in-time pipeline; closed rows carry zero.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd
+
+  - name: open_opportunities
+    description: Count of open opportunities, attributed to the expected close date. Excludes closed opportunities, internal and deleted accounts.
+    type: simple
+    type_params:
+      measure: open_opportunities_count
+
+  - name: win_rate
+    description: Share of closed opportunities that were won, defined as opportunities won divided by opportunities closed, by count and not by amount. Excludes open opportunities, internal and deleted accounts.
+    type: ratio
+    type_params:
+      numerator:
+        name: opportunities_won
+      denominator:
+        name: opportunities_closed

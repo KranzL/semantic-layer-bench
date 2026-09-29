@@ -1,0 +1,144 @@
+version: 2
+
+semantic_models:
+  - name: customers
+    description: >
+      Customers (logos), one row per top-level account. A customer is a parent account
+      together with all of its child accounts; an account with no parent is its own customer.
+      Excludes Relay's internal accounts (QA, demo, sandbox) and soft-deleted accounts. This
+      is the company-standard grain for customer counts, churn and ARPA, and its segment and
+      region are the standard ones for slicing metrics.
+    model: ref('sem_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+        description: The customer (logo), identified by the account id of its top-level account.
+    dimensions:
+      - name: customer_name
+        type: categorical
+        description: Name of the customer's top-level account. Not unique; different customers can share a name.
+      - name: segment
+        type: categorical
+        description: >
+          Sales segment of the customer's top-level account: SMB, MidMarket or Enterprise.
+          Child accounts are reported under their parent's segment, not their own.
+      - name: region
+        type: categorical
+        description: >
+          Sales region of the customer's top-level account: NA, EMEA, APAC or LATAM. Child
+          accounts are reported under their parent's region, not their own.
+      - name: country
+        type: categorical
+        description: Country of the customer's top-level account.
+      - name: billing_currency
+        type: categorical
+        description: >
+          Currency the customer's top-level account is billed in (USD, EUR, GBP or JPY). Child
+          accounts may bill in a different currency. Metric values are always in USD.
+      - name: has_child_accounts
+        type: categorical
+        description: True when at least one reportable child account rolls up to this customer.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the customer's top-level account was created in the billing system. Not the date it first paid.
+
+  - name: accounts
+    description: >
+      Billing accounts, one row per account, including child accounts. Excludes Relay's
+      internal accounts (QA, demo, sandbox) and soft-deleted accounts. Use these dimensions
+      to slice by the attributes of the account that was actually billed; use the customer
+      dimensions for standard reporting where child accounts roll up to their parent.
+    model: ref('sem_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: The billing account that holds subscriptions, invoices, usage and opportunities.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: The customer (logo) this account rolls up to; itself when it has no parent.
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Name of the billing account. Not unique.
+      - name: segment
+        type: categorical
+        description: >
+          Sales segment recorded on the billing account itself (SMB, MidMarket, Enterprise).
+          For child accounts this differs from the customer's segment.
+      - name: region
+        type: categorical
+        description: >
+          Sales region recorded on the billing account itself (NA, EMEA, APAC, LATAM). For
+          child accounts this can differ from the customer's region.
+      - name: country
+        type: categorical
+        description: Country recorded on the billing account itself.
+      - name: billing_currency
+        type: categorical
+        description: Currency the billing account is invoiced in (USD, EUR, GBP or JPY). Metric values are always in USD.
+      - name: is_child_account
+        type: categorical
+        description: True when the account has a parent account and therefore rolls up to another customer.
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the billing account was created in the billing system.
+
+  - name: plans
+    description: >
+      Subscription plan catalogue, one row per plan. Monthly and annual variants of the same
+      product are separate plans that share a plan family.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: The subscription plan, for example PLN-GROWTH-M or PLN-GROWTH-Y.
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Display name of the plan; annual variants carry the suffix Annual (for example Growth Annual).
+      - name: plan_family
+        type: categorical
+        description: Product tier regardless of billing interval - Starter, Growth, Scale or Enterprise.
+      - name: billing_interval
+        type: categorical
+        description: How often the plan is billed - month or year. Enterprise is annual only.
+      - name: list_price_usd
+        type: categorical
+        expr: list_price_usd_minor / 100.0
+        description: >
+          USD list price per seat per billing interval (per month for monthly plans, per year
+          for annual plans), before discounts. Contracted prices in other currencies differ.
+
+  - name: sales_reps
+    description: Sales representatives, one row per rep, with the team and region they belong to.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: The sales representative who owns an opportunity.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Full name of the sales representative.
+      - name: team
+        type: categorical
+        description: Sales team of the rep - NA Sales, EMEA Sales, APAC Sales or LATAM Sales.
+      - name: region
+        type: categorical
+        description: >
+          Region of the rep's sales team (NA, EMEA, APAC, LATAM). This is the rep's region,
+          which can differ from the region of the customer on the opportunity.
+      - name: hired_at
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the rep was hired.

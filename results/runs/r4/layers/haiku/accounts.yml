@@ -1,0 +1,40 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    model: ref('dim_accounts')
+    description: Account dimension table with customer attributes including segment, region, and customer status.
+    entities:
+      - name: account_id
+        type: primary
+        description: Unique account identifier
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Customer account name
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date account was created
+      - name: country
+        type: categorical
+        description: Country where account is located
+      - name: region
+        type: categorical
+        description: Geographic region (NA, EMEA, APAC, etc.)
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, Mid-Market, Enterprise)
+      - name: billing_currency
+        type: categorical
+        description: Default billing currency for the account
+      - name: is_internal
+        type: categorical
+        description: Whether account is internal to Relay
+      - name: parent_account_id
+        type: categorical
+        description: Parent account ID if this is a sub-account
+      - name: is_deleted
+        type: categorical
+        description: Whether account has been deleted

@@ -1,0 +1,25 @@
+version: 2
+
+semantic_models:
+  - name: usage
+    model: ref('fct_usage_daily')
+    defaults:
+      agg_time_dimension: usage_date
+    description: Daily usage events for each account and event type. Used to calculate billable usage and feature adoption metrics.
+    entities:
+      - name: account_id
+        type: primary
+        role: account
+    measures:
+      - name: quantity
+        description: Quantity of usage events
+        agg: sum
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date of usage
+      - name: event_type
+        type: categorical
+        description: Type of usage event (api_call, webhook, etc.)

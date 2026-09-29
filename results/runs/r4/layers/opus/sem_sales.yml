@@ -1,0 +1,146 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      Sales opportunities from the CRM, one row per opportunity, dated by close date (for open
+      opportunities, the expected close date). amount_usd is the deal's annual contract value in USD.
+      Includes new-logo ('new') and upsell ('expansion') opportunities in every stage (open,
+      closed_won, closed_lost). Excludes internal/test accounts. Every opportunity has an owning rep.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Sales opportunity.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Prospect/customer account.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Sales rep who owns the opportunity (slice by sales_rep__team for sales team).
+      - name: calendar_date
+        type: foreign
+        expr: close_date
+        description: Close date, for fiscal calendar slicing.
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the opportunity closed (won or lost); for open opportunities, the expected close date.
+      - name: opportunity_created_date
+        type: time
+        expr: created_date
+        type_params:
+          time_granularity: day
+        description: Date the opportunity was created.
+      - name: opportunity_type
+        type: categorical
+        description: "'new' (new-logo deal) or 'expansion' (upsell/seat growth on an existing customer)."
+      - name: stage
+        type: categorical
+        description: Current stage - open, closed_won or closed_lost.
+    measures:
+      - name: bookings_usd
+        agg: sum
+        expr: "case when is_won = 1 then amount_usd else 0 end"
+        description: >
+          Annual contract value in USD of closed_won opportunities (new and expansion), by close date.
+          Excludes open and closed_lost opportunities and internal accounts.
+      - name: new_bookings_usd
+        agg: sum
+        expr: "case when is_won = 1 and opportunity_type = 'new' then amount_usd else 0 end"
+        description: >
+          Annual contract value in USD of closed_won opportunities of type 'new' (new logos), by close date.
+          Excludes expansion deals, open and lost opportunities and internal accounts.
+      - name: expansion_bookings_usd
+        agg: sum
+        expr: "case when is_won = 1 and opportunity_type = 'expansion' then amount_usd else 0 end"
+        description: Annual contract value in USD of closed_won 'expansion' opportunities, by close date.
+      - name: pipeline_usd
+        agg: sum
+        expr: "case when stage = 'open' then amount_usd else 0 end"
+        description: Annual contract value in USD of opportunities still open, by expected close date. Excludes closed won and lost.
+      - name: won_opportunities
+        agg: sum
+        expr: is_won
+        description: Count of closed_won opportunities by close date.
+      - name: lost_opportunities
+        agg: sum
+        expr: is_lost
+        description: Count of closed_lost opportunities by close date.
+      - name: closed_opportunities
+        agg: sum
+        expr: is_closed
+        description: Count of closed opportunities (closed_won + closed_lost) by close date. Excludes open opportunities.
+
+metrics:
+  - name: bookings
+    label: Bookings (USD)
+    description: >
+      Total annual contract value in USD of opportunities closed won in the period (new logos plus expansion),
+      by close date. Excludes open and lost opportunities and internal/test accounts. Slice by
+      opportunity__opportunity_type, sales_rep__team, account__segment, etc.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New bookings (USD)
+    description: >
+      Annual contract value in USD of closed-won opportunities of type 'new' (new-logo deals), by close date.
+      Excludes expansion deals, open and lost opportunities and internal/test accounts.
+    type: simple
+    type_params:
+      measure: new_bookings_usd
+
+  - name: expansion_bookings
+    label: Expansion bookings (USD)
+    description: Annual contract value in USD of closed-won 'expansion' opportunities, by close date. Excludes new-logo deals.
+    type: simple
+    type_params:
+      measure: expansion_bookings_usd
+
+  - name: open_pipeline
+    label: Open pipeline (USD)
+    description: Annual contract value in USD of opportunities still in 'open' stage, by expected close date. Excludes won and lost.
+    type: simple
+    type_params:
+      measure: pipeline_usd
+
+  - name: won_deals
+    label: Deals won
+    description: Number of opportunities closed won (new and expansion) by close date. Excludes open and lost.
+    type: simple
+    type_params:
+      measure: won_opportunities
+
+  - name: lost_deals
+    label: Deals lost
+    description: Number of opportunities closed lost by close date.
+    type: simple
+    type_params:
+      measure: lost_opportunities
+
+  - name: closed_deals
+    label: Deals closed
+    description: Number of opportunities closed (won + lost) by close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: closed_opportunities
+
+  - name: win_rate
+    label: Win rate
+    description: >
+      Share of closed opportunities that were won, by count: closed_won / (closed_won + closed_lost),
+      by close date. Open opportunities are excluded from numerator and denominator. Includes both new and
+      expansion unless filtered by opportunity__opportunity_type. Count-based, not value-weighted.
+    type: ratio
+    type_params:
+      numerator: won_deals
+      denominator: closed_deals
