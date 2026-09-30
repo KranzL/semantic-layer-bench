@@ -1,0 +1,239 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: >
+      Issued invoices for external customers, one row per invoice. Includes invoices with status open, paid or
+      uncollectible, of type subscription or services. Excludes draft and void invoices and internal/QA accounts.
+      Amounts are in USD, net of discount, excluding tax, converted at the FX rate on the issue date.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the invoice was issued (UTC date of issued_at). Billings are attributed to this date, not the service period or due date.
+      - name: invoice_type
+        type: categorical
+        description: subscription (recurring seat billing) or services (one-off professional services).
+      - name: status
+        type: categorical
+        description: Current invoice status, open, paid or uncollectible. Draft and void invoices are not in this model.
+      - name: currency
+        type: categorical
+        description: Currency the invoice was issued in (USD, EUR, GBP, JPY). Amounts are converted to USD regardless.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the invoiced account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the invoiced account.
+      - name: country
+        type: categorical
+        description: Country of the invoiced account.
+    measures:
+      - name: billed_usd
+        description: >
+          Invoiced amount in USD: subtotal minus discount, excluding tax, at the issue-date FX rate. Includes open,
+          paid and uncollectible invoices, subscription and services. Excludes draft and void invoices, tax, credit
+          notes (see refunds) and internal accounts. Gross of credit notes.
+        agg: sum
+        expr: billed_usd
+
+  - name: recognized_revenue
+    description: >
+      Recognized revenue by invoice and calendar month for external customers. Subscription invoices are spread
+      evenly per day across their service period; services invoices are recognized in full on the issue date.
+      Excludes draft and void invoices, tax, internal/QA accounts and months after the latest invoice month
+      (scheduled but not yet recognized). Gross of credit notes. Amounts are USD at the invoice issue-date FX rate.
+    model: ref('sem_revenue')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_line
+        type: primary
+        expr: invoice_id || '|' || cast(recognized_month as varchar)
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: First day of the calendar month in which the revenue is recognized (by service period, not by issue or payment date).
+      - name: invoice_type
+        type: categorical
+        description: subscription (recognized daily over the service period) or services (recognized on the issue date).
+      - name: status
+        type: categorical
+        description: Current status of the source invoice, open, paid or uncollectible. Draft and void invoices are not in this model.
+      - name: currency
+        type: categorical
+        description: Currency the source invoice was issued in (USD, EUR, GBP, JPY). Amounts are converted to USD regardless.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the account.
+      - name: country
+        type: categorical
+        description: Country of the account.
+    measures:
+      - name: recognized_usd
+        description: >
+          Recognized revenue in USD, net of discount and excluding tax, converted at the invoice issue-date FX rate.
+          Includes subscription and services invoices that are open, paid or uncollectible. Excludes draft and void
+          invoices, unrecognized future periods, credit notes and internal accounts.
+        agg: sum
+        expr: recognized_usd
+
+  - name: payments
+    description: >
+      Successful customer payments, one row per payment, for external customers. Excludes failed payments (retries
+      of the same invoice are not double counted) and internal/QA accounts. Amounts are USD at the receipt-date FX rate
+      and are tax-inclusive because customers pay the invoice total.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the payment was received (UTC date of received_at). Cash is attributed to this date, not the invoice date.
+      - name: method
+        type: categorical
+        description: Payment method, card, ach or wire.
+      - name: currency
+        type: categorical
+        description: Currency the payment was made in (USD, EUR, GBP, JPY). Amounts are converted to USD regardless.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the paying account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the paying account.
+      - name: country
+        type: categorical
+        description: Country of the paying account.
+    measures:
+      - name: collected_usd
+        description: >
+          Cash received in USD from succeeded payments, including tax, at the receipt-date FX rate. Excludes failed
+          payments, refunds and credit notes (see refunds) and internal accounts.
+        agg: sum
+        expr: collected_usd
+
+  - name: credit_notes
+    description: >
+      Credit notes issued against paid invoices to external customers, one row per credit note. This is how
+      refunds and credits are recorded. Includes all reasons (billing_error, downgrade_adjustment, service_credit,
+      goodwill). Excludes internal/QA accounts. Amounts are USD at the issue-date FX rate, as issued on the invoice (tax-inclusive).
+    model: ref('sem_credit_notes')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued (UTC date of issued_at), not the date of the original invoice.
+      - name: reason
+        type: categorical
+        description: Reason for the credit, billing_error, downgrade_adjustment, service_credit or goodwill.
+      - name: currency
+        type: categorical
+        description: Currency of the credit note (USD, EUR, GBP, JPY). Amounts are converted to USD regardless.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the account.
+      - name: country
+        type: categorical
+        description: Country of the account.
+    measures:
+      - name: refunded_usd
+        description: >
+          Credit note value in USD at the issue-date FX rate, tax-inclusive. Includes every credit note reason.
+          Excludes failed payments, unpaid or voided invoices and internal accounts.
+        agg: sum
+        expr: refunded_usd
+
+  - name: usage
+    description: >
+      Billable product usage per account per day. Includes only api_call events on days when the account had a live
+      (active or past_due) subscription. Excludes health_check pings (automated, not billed), trial-only days and
+      internal/QA accounts.
+    model: ref('sem_usage')
+    defaults:
+      agg_time_dimension: usage_date
+    entities:
+      - name: usage_day
+        type: primary
+        expr: account_id || '|' || cast(usage_date as varchar)
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: usage_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Calendar day on which the usage occurred.
+      - name: event_type
+        type: categorical
+        description: Usage event type. Only api_call is in this model.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the account.
+      - name: country
+        type: categorical
+        description: Country of the account.
+      - name: billing_currency
+        type: categorical
+        description: Billing currency (USD, EUR, GBP, JPY) set on the account.
+    measures:
+      - name: billable_quantity
+        description: >
+          Number of billable api_call events. Excludes health_check events, trial usage and internal accounts.
+        agg: sum
+        expr: quantity

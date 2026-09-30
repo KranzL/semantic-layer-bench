@@ -1,0 +1,159 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      Month-end snapshot of live subscriptions, one row per subscription per month-end (Jan 2023 to Jun 2025).
+      Includes only subscriptions whose version at that month-end is active or past_due. Excludes trialing,
+      canceled and ended subscriptions, and internal/QA accounts (is_internal = true). MRR is in USD, uses the
+      month-end FX rate, is net of the subscription discount and is annual plans divided by 12. Tax and services
+      (one-off) invoices are not part of it. Seat count and MRR are point-in-time balances; do not sum them across months.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_id || '|' || cast(month_end as varchar)
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Month-end date of the snapshot (last calendar day of the month). Balances are measured at this date.
+      - name: plan_id
+        type: categorical
+        description: Plan identifier of the subscription version live at the month-end (for example PLN-GROWTH-M).
+      - name: plan_name
+        type: categorical
+        description: Plan display name at the month-end, for example Growth or Growth Annual. Monthly and annual variants are separate names.
+      - name: plan_family
+        type: categorical
+        description: Plan tier (Starter, Growth, Scale, Enterprise) combining the monthly and annual variants of the plan.
+      - name: billing_interval
+        type: categorical
+        description: Billing cadence of the plan, month or year. Annual plans are still reported as MRR (annual price / 12).
+      - name: currency
+        type: categorical
+        description: Currency the subscription is billed in (USD, EUR, GBP, JPY). MRR is converted to USD regardless of this value.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the customer, which is the parent account when one exists.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the customer, which is the parent account when one exists.
+      - name: country
+        type: categorical
+        description: Country of the customer, which is the parent account when one exists.
+    measures:
+      - name: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at the month-end. Sum over live (active or past_due) subscriptions of
+          seats x unit price x (1 - discount), annual plans divided by 12, converted at the month-end FX rate.
+          Excludes trials, canceled subscriptions, tax, one-off services and internal accounts. Non-additive over time:
+          for periods longer than a month it returns the last month-end in the period.
+        agg: sum
+        expr: mrr_usd
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: live_seats
+        description: >
+          Seats on live (active or past_due) subscriptions at the month-end. Excludes trialing and canceled
+          subscriptions and internal accounts. Non-additive over time (last month-end in the period).
+        agg: sum
+        expr: seats
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      Customer lifecycle by month-end, one row per customer per month-end from the customer's first paying month
+      onwards. A customer is the parent account when one exists, otherwise the account itself, so a parent and its
+      child accounts count once. A customer is paying at a month-end when at least one of its subscriptions is
+      active or past_due; trials, canceled subscriptions and internal/QA accounts never count. Plan and currency are
+      those of the customer's largest live subscription, carried forward after churn so churned customers keep a plan.
+      Reactivated customers count as paying again but not as new.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: month_end
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_id || '|' || cast(month_end as varchar)
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: month_end
+        type: time
+        type_params:
+          time_granularity: day
+        description: Month-end date of the snapshot (last calendar day of the month). Customer counts are measured at this date; new and churned flags cover the month ending on it.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the customer account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the customer account.
+      - name: country
+        type: categorical
+        description: Country of the customer account.
+      - name: plan_id
+        type: categorical
+        description: Plan identifier of the customer's largest live subscription, as of its latest paying month.
+      - name: plan_family
+        type: categorical
+        description: Plan tier (Starter, Growth, Scale, Enterprise) of the customer's largest live subscription, as of its latest paying month.
+      - name: billing_interval
+        type: categorical
+        description: Billing cadence (month or year) of the customer's largest live subscription, as of its latest paying month.
+      - name: currency
+        type: categorical
+        description: Billing currency (USD, EUR, GBP, JPY) of the customer's largest live subscription, as of its latest paying month.
+    measures:
+      - name: paying_customers
+        description: >
+          Customers with at least one live (active or past_due) subscription at the month-end. Excludes trial-only
+          customers, canceled customers, internal accounts, and counts a parent with its children once.
+          Non-additive over time (last month-end in the period).
+        agg: sum
+        expr: paying_customer
+        non_additive_dimension:
+          name: month_end
+          window_choice: max
+      - name: new_customers
+        description: >
+          Customers whose first ever paying month-end is in the period. Excludes trial starts that never converted by
+          month-end, reactivations of previously paying customers, and internal accounts. Additive over time.
+        agg: sum
+        expr: new_customer
+      - name: churned_customers
+        description: >
+          Logo churn: customers paying at the prior month-end and not paying at this month-end. Includes voluntary
+          cancellations and involuntary ends; excludes downgrades, plan changes, seat reductions and trial expiries.
+          Additive over time.
+        agg: sum
+        expr: churned_customer
+      - name: opening_customers
+        description: >
+          Customers paying at the prior month-end (the churn-rate denominator). Additive over time, so quarterly or
+          yearly churn rate is the sum of churned customers over the sum of monthly opening customers.
+        agg: sum
+        expr: opening_customer
+      - name: churned_mrr_usd
+        description: >
+          MRR in USD that the churned customers were paying at the prior month-end. Excludes contraction from
+          downgrades and seat reductions. Additive over time.
+        agg: sum
+        expr: churned_mrr_usd

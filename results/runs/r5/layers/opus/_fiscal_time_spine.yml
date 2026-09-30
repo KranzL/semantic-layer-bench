@@ -1,0 +1,22 @@
+version: 2
+models:
+  - name: sem_fiscal_time_spine
+    description: >
+      Daily time spine with Relay's fiscal calendar as custom granularities. The fiscal year starts
+      on 1 February and is named for the calendar year in which it ends (FY2025 = 2024-02-01 to
+      2025-01-31). Use metric_time__fiscal_quarter / metric_time__fiscal_year to report by fiscal period.
+    time_spine:
+      standard_granularity_column: date_day
+      custom_granularities:
+        - name: fiscal_year
+          column_name: fiscal_year
+        - name: fiscal_quarter
+          column_name: fiscal_quarter
+    columns:
+      - name: date_day
+        description: Calendar date.
+        granularity: day
+      - name: fiscal_year
+        description: Fiscal year label, e.g. FY2025 (1 Feb 2024 to 31 Jan 2025).
+      - name: fiscal_quarter
+        description: Fiscal quarter label, e.g. FY2025-Q1 (Feb-Apr 2024).

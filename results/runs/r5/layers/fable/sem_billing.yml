@@ -1,0 +1,415 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: >
+      One row per invoice, for subscription and professional services invoices. Includes every
+      invoice status (draft, open, paid, uncollectible, void) so status can be inspected, but the
+      billing measures count only finalized invoices (open, paid, uncollectible). Excludes invoices
+      of Relay internal accounts; soft-deleted accounts have no invoices. Amounts are in USD at the
+      FX rate of the invoice issue date.
+    model: ref('sem_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+        description: Invoice identifier (INV-xxxxxxx).
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account the invoice was issued to.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the billing account rolls up to; the parent account when there is one.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: >
+          Plan the invoiced subscription was on at the start of the invoice's service period. Empty
+          for services invoices, which are not tied to a subscription.
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: >
+          Date the invoice was issued (UTC). It can fall a few days after the start of the service
+          period. Not the due date or the payment date.
+      - name: due_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date payment of the invoice is due, normally 30 days after issue. Not the date it was paid.
+      - name: invoice_type
+        type: categorical
+        description: >
+          subscription for recurring seat-based plan charges covering a service period, or services
+          for one-off professional services charges with no subscription.
+      - name: invoice_status
+        type: categorical
+        description: >
+          Current status of the invoice. draft is not yet issued to the customer; open is issued
+          and awaiting payment; paid is settled in full; uncollectible is issued but written off as
+          bad debt; void is cancelled. Billing measures count open, paid and uncollectible only.
+      - name: currency
+        type: categorical
+        description: >
+          Currency the invoice was issued in (USD, EUR, GBP or JPY). Measures stay in USD when
+          sliced by this dimension.
+    measures:
+      - name: billings_usd
+        agg: sum
+        expr: case when is_billed then net_amount_usd else 0 end
+        description: >
+          Invoiced amount in USD, subtotal less invoice discount, excluding tax, on finalized
+          invoices (open, paid, uncollectible) by issue date. Includes subscription and services
+          invoices. Excludes draft and void invoices and is not reduced by credit notes.
+      - name: billed_tax_usd
+        agg: sum
+        expr: case when is_billed then tax_usd else 0 end
+        description: >
+          Sales tax or VAT in USD charged on finalized invoices (open, paid, uncollectible) by
+          issue date. Excludes draft and void invoices. Tax is not part of billings or revenue.
+      - name: billed_invoice_count
+        agg: count_distinct
+        expr: case when is_billed then invoice_id end
+        description: Number of finalized invoices (open, paid, uncollectible) by issue date. Excludes draft and void invoices.
+      - name: uncollectible_usd
+        agg: sum
+        expr: case when invoice_status = 'uncollectible' then total_usd else 0 end
+        description: >
+          Total in USD, including tax, of invoices currently marked uncollectible, by issue date.
+          Excludes open invoices that are merely overdue.
+      - name: open_invoice_usd
+        agg: sum
+        expr: case when invoice_status = 'open' then total_usd else 0 end
+        description: >
+          Total in USD, including tax, of invoices currently open (issued and unpaid), by issue
+          date. Reflects status as of the latest data load, not as of a past date. Excludes
+          uncollectible and draft invoices.
+
+  - name: revenue_recognition
+    description: >
+      Revenue recognition schedule: one row per invoice per calendar month in which part of it is
+      recognized. Subscription invoices are spread evenly per day across their service period;
+      services invoices are recognized in full on the issue date. Includes finalized invoices
+      (open, paid, uncollectible); excludes draft and void invoices and Relay internal accounts.
+      Months after the latest invoice date hold revenue scheduled from already issued invoices only.
+    model: ref('sem_revenue_recognition')
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: revenue_line
+        type: primary
+        expr: revenue_line_id
+        description: Unique key of the row, the invoice id combined with the recognition month.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice the recognized revenue comes from.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account the invoice was issued to.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the billing account rolls up to; the parent account when there is one.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan of the invoiced subscription at the start of the invoice's service period. Empty for services revenue.
+    dimensions:
+      - name: recognized_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: >
+          Calendar month in which the revenue is earned, stored as the first day of the month.
+          Not the month the invoice was issued or paid.
+      - name: revenue_type
+        type: categorical
+        expr: invoice_type
+        description: subscription for recurring plan revenue recognized over the service period, or services for one-off professional services revenue.
+      - name: invoice_status
+        type: categorical
+        description: Current status of the source invoice (open, paid or uncollectible). Draft and void invoices are not in this model.
+      - name: currency
+        type: categorical
+        description: Currency of the source invoice (USD, EUR, GBP or JPY). Measures stay in USD when sliced by this dimension.
+    measures:
+      - name: recognized_revenue_usd
+        agg: sum
+        expr: recognized_revenue_usd
+        description: >
+          Revenue in USD earned in the month, net of invoice discounts and excluding tax, converted
+          at the FX rate of the invoice issue date. Includes subscription and services revenue from
+          open, paid and uncollectible invoices. Excludes draft and void invoices and is not
+          reduced by credit notes.
+
+  - name: payments
+    description: >
+      One row per payment attempt against an invoice. Includes succeeded and failed attempts; only
+      succeeded attempts are cash, and the cash measures count those alone. Excludes payments of
+      Relay internal accounts. Amounts include tax and are in USD at the FX rate of the date received.
+    model: ref('sem_payments')
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+        description: Payment attempt identifier.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Invoice the payment attempt was made against.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that owns the invoice being paid.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the billing account rolls up to; the parent account when there is one.
+    dimensions:
+      - name: received_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Date the payment attempt was received or processed (UTC). Not the invoice issue date or due date.
+      - name: payment_status
+        type: categorical
+        description: succeeded when the money was collected, or failed when the attempt was declined and no money moved.
+      - name: payment_method
+        type: categorical
+        description: How the payment was made, card, ach or wire.
+      - name: currency
+        type: categorical
+        description: Currency the payment was made in (USD, EUR, GBP or JPY). Measures stay in USD when sliced by this dimension.
+    measures:
+      - name: cash_collected_usd
+        agg: sum
+        expr: case when is_succeeded then amount_usd else 0 end
+        description: >
+          Cash in USD received from succeeded payments by date received, including tax. Excludes
+          failed payment attempts and is gross of refunds.
+      - name: succeeded_payment_count
+        agg: sum
+        expr: case when is_succeeded then 1 else 0 end
+        description: Number of succeeded payments by date received. Excludes failed attempts.
+      - name: failed_payment_count
+        agg: sum
+        expr: case when is_succeeded then 0 else 1 end
+        description: Number of failed payment attempts by date attempted. Excludes succeeded payments.
+
+  - name: credit_notes
+    description: >
+      One row per credit note, which refunds part of a paid invoice. Includes all refund reasons
+      (billing_error, downgrade_adjustment, goodwill, service_credit). Excludes credit notes of
+      Relay internal accounts. Amounts are in USD at the FX rate of the credit note issue date.
+    model: ref('sem_credit_notes')
+    defaults:
+      agg_time_dimension: refund_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+        description: Credit note identifier.
+      - name: invoice
+        type: foreign
+        expr: invoice_id
+        description: Paid invoice the credit note refunds.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that owns the refunded invoice.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the billing account rolls up to; the parent account when there is one.
+    dimensions:
+      - name: refund_date
+        type: time
+        expr: issued_date
+        type_params:
+          time_granularity: day
+        description: Date the credit note was issued (UTC). Not the date of the invoice or payment being refunded.
+      - name: refund_reason
+        type: categorical
+        description: >
+          Why the credit note was issued. billing_error corrects a wrong charge;
+          downgrade_adjustment credits unused value after a downgrade; goodwill is a discretionary
+          gesture; service_credit compensates for a service failure.
+      - name: currency
+        type: categorical
+        description: Currency of the credit note (USD, EUR, GBP or JPY), the same as the refunded invoice. Measures stay in USD when sliced by this dimension.
+    measures:
+      - name: refunds_usd
+        agg: sum
+        expr: amount_usd
+        description: >
+          Amount in USD refunded through credit notes, as a positive number, by credit note issue
+          date. Includes all refund reasons. Excludes failed payments and voided invoices, which
+          are not refunds.
+      - name: refund_count
+        agg: count_distinct
+        expr: credit_note_id
+        description: Number of credit notes issued, all reasons, by credit note issue date.
+
+metrics:
+  - name: billings
+    label: Billings
+    description: >
+      Amount invoiced in USD by invoice issue date: subtotal less discount, excluding tax, on
+      finalized invoices (open, paid, uncollectible), converted at the issue-date FX rate. Includes
+      subscription and services invoices; slice by invoice__invoice_type to separate them. Excludes
+      draft and void invoices, Relay internal accounts, and is not reduced by refunds.
+    type: simple
+    type_params:
+      measure: billings_usd
+  - name: subscription_billings
+    label: Subscription billings
+    description: >
+      Billings in USD from subscription invoices only, by issue date, excluding tax. Excludes
+      services invoices, draft and void invoices and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: billings_usd
+    filter: |
+      {{ Dimension('invoice__invoice_type') }} = 'subscription'
+  - name: services_billings
+    label: Services billings
+    description: >
+      Billings in USD from professional services invoices only, by issue date, excluding tax.
+      Excludes subscription invoices, draft and void invoices and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: billings_usd
+    filter: |
+      {{ Dimension('invoice__invoice_type') }} = 'services'
+  - name: billed_tax
+    label: Tax billed
+    description: >
+      Sales tax or VAT in USD charged on finalized invoices (open, paid, uncollectible) by issue
+      date. Excludes draft and void invoices. Tax is excluded from billings and revenue.
+    type: simple
+    type_params:
+      measure: billed_tax_usd
+  - name: invoices_billed
+    label: Invoices billed
+    description: Number of finalized invoices (open, paid, uncollectible) by issue date. Excludes draft and void invoices and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: billed_invoice_count
+  - name: uncollectible_invoices_amount
+    label: Uncollectible invoices
+    description: >
+      Total in USD, including tax, of invoices currently written off as uncollectible, by invoice
+      issue date. Excludes open invoices that are overdue but not written off.
+    type: simple
+    type_params:
+      measure: uncollectible_usd
+  - name: open_invoices_amount
+    label: Open invoices
+    description: >
+      Total in USD, including tax, of invoices issued and still unpaid as of the latest data load,
+      by invoice issue date. Excludes uncollectible, draft and void invoices. Not a historical
+      receivables balance.
+    type: simple
+    type_params:
+      measure: open_invoice_usd
+  - name: recognized_revenue
+    label: Recognized revenue
+    description: >
+      Revenue in USD earned in the period, net of discounts and excluding tax. Subscription
+      invoices are recognized evenly per day over the service period and services invoices on the
+      issue date, converted at the invoice issue-date FX rate. Excludes draft and void invoices and
+      Relay internal accounts, and is not reduced by refunds. Future months show scheduled revenue
+      from invoices already issued.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+  - name: subscription_revenue
+    label: Subscription revenue
+    description: >
+      Recognized revenue in USD from subscription invoices only, spread over the service period.
+      Excludes services revenue, tax, draft and void invoices and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+    filter: |
+      {{ Dimension('revenue_line__revenue_type') }} = 'subscription'
+  - name: services_revenue
+    label: Services revenue
+    description: >
+      Recognized revenue in USD from professional services invoices only, recognized on the issue
+      date. Excludes subscription revenue, tax, draft and void invoices and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+    filter: |
+      {{ Dimension('revenue_line__revenue_type') }} = 'services'
+  - name: cash_collected
+    label: Cash collected
+    description: >
+      Cash in USD received from succeeded payments, by date received, converted at that date's FX
+      rate. Includes tax. Excludes failed payment attempts and Relay internal accounts, and is
+      gross of refunds.
+    type: simple
+    type_params:
+      measure: cash_collected_usd
+  - name: refunds
+    label: Refunds
+    description: >
+      Amount in USD refunded to customers through credit notes, as a positive number, by credit
+      note issue date, converted at that date's FX rate. Includes all reasons (billing_error,
+      downgrade_adjustment, goodwill, service_credit). Excludes failed payments, voided invoices
+      and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: refunds_usd
+  - name: refund_count
+    label: Refund count
+    description: Number of credit notes issued, all reasons, by credit note issue date. Excludes Relay internal accounts.
+    type: simple
+    type_params:
+      measure: refund_count
+  - name: net_cash_collected
+    label: Net cash collected
+    description: >
+      Cash collected less refunds, in USD. Cash is counted on the date received and refunds on the
+      credit note issue date, so a refund reduces the period it was issued in, not the period of
+      the original payment. Includes tax; excludes failed payments and Relay internal accounts.
+    type: derived
+    type_params:
+      expr: cash_collected - coalesce(refunds, 0)
+      metrics:
+        - name: cash_collected
+        - name: refunds
+  - name: payment_failure_rate
+    label: Payment failure rate
+    description: >
+      Failed payment attempts divided by all payment attempts (succeeded plus failed), by attempt
+      date, as a fraction. Counts attempts, not amounts or invoices.
+    type: derived
+    type_params:
+      expr: failed_payments / nullif(failed_payments + succeeded_payments, 0)
+      metrics:
+        - name: failed_payments
+        - name: succeeded_payments
+  - name: failed_payments
+    label: Failed payments
+    description: Number of failed payment attempts by attempt date. Excludes succeeded payments and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: failed_payment_count
+  - name: succeeded_payments
+    label: Succeeded payments
+    description: Number of succeeded payments by date received. Excludes failed attempts and Relay internal accounts.
+    type: simple
+    type_params:
+      measure: succeeded_payment_count

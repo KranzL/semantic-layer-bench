@@ -1,0 +1,77 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    description: Fact table with one row per invoice. Includes subscription invoices (recurring revenue) and services invoices (one-time). Invoice statuses include 'draft', 'sent', 'paid', and 'uncollectible'.
+    model: fct_invoices
+    defaults:
+      agg_time_dimension: issued_date
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: subscription
+        type: foreign
+        role: subscription
+        expr: subscription_id
+      - name: invoice
+        type: primary
+        role: invoice
+        expr: invoice_id
+
+    dimensions:
+      - name: invoice_id
+        description: Unique identifier for the invoice
+        type: categorical
+
+      - name: invoice_number
+        description: User-visible invoice number
+        type: categorical
+
+      - name: issued_date
+        description: Date the invoice was issued
+        type: time
+
+      - name: invoice_type
+        description: Type of invoice - 'subscription' for recurring revenue or 'services' for one-time charges
+        type: categorical
+
+      - name: status
+        description: Invoice status - 'draft', 'sent', 'paid', or 'uncollectible'
+        type: categorical
+
+      - name: period_start
+        description: Start date of the billing period for subscription invoices
+        type: time
+
+      - name: period_end
+        description: End date of the billing period for subscription invoices
+        type: time
+
+    measures:
+      - name: gross_billings
+        description: Total invoice amount before discounts in USD
+        agg: sum
+        expr: subtotal_minor * usd_per_unit / 100.0
+
+      - name: billings
+        description: Net invoice amount after discounts in USD
+        agg: sum
+        expr: (subtotal_minor - discount_minor) * usd_per_unit / 100.0
+
+      - name: discounts
+        description: Total discounts applied in USD
+        agg: sum
+        expr: discount_minor * usd_per_unit / 100.0
+
+      - name: invoice_count
+        description: Count of invoices
+        agg: count_distinct
+        expr: invoice_id
+
+      - name: paid_amount
+        description: Amount of paid invoices in USD
+        agg: sum
+        expr: CASE WHEN status = 'paid' THEN (subtotal_minor - discount_minor) * usd_per_unit / 100.0 ELSE 0 END

@@ -1,0 +1,130 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: >
+      One row per billing account (the legal entity that is invoiced), including internal/test and
+      soft-deleted accounts so they can be inspected; every fact semantic model already excludes
+      internal and deleted accounts. Attributes are the account's own. Subsidiary accounts point to
+      their parent through the customer entity; use customer__* dimensions to report by the
+      parent (logo) instead.
+    model: ref('sem_accounts')
+    entities:
+      - name: account
+        type: primary
+        expr: account_id
+        description: Billing account id (ACC-xxxxx). One customer can own several accounts.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Ultimate parent account of this account (itself for top-level accounts).
+    dimensions:
+      - name: account_name
+        type: categorical
+        description: Account display name.
+      - name: segment
+        type: categorical
+        description: Sales segment of the billing account itself (SMB, MidMarket, Enterprise). For subsidiaries this can differ from the parent's segment (customer__segment).
+      - name: region
+        type: categorical
+        description: Geographic region of the billing account itself (NA, EMEA, APAC, LATAM).
+      - name: country
+        type: categorical
+        description: Country of the billing account itself.
+      - name: billing_currency
+        type: categorical
+        description: Default billing currency of the account (USD, EUR, GBP, JPY). Transaction-level currency is the separate `currency` dimension on each fact.
+      - name: is_subsidiary
+        type: categorical
+        description: True when the account has a parent account (it rolls up into the parent's customer/logo).
+      - name: is_internal
+        type: categorical
+        description: True for Relay internal/test accounts. These are excluded from every metric.
+      - name: is_deleted
+        type: categorical
+        description: True for soft-deleted accounts. These are excluded from every metric.
+      - name: created_date
+        type: time
+        description: Date the account was created.
+        type_params:
+          time_granularity: day
+
+  - name: customers
+    description: >
+      One row per customer (logo): a reportable top-level account. Subsidiary accounts roll up into
+      their parent's customer. Excludes internal/test and soft-deleted accounts. Customer attributes
+      are the parent account's own segment, region, country and currency; use these for all logo
+      metrics (paying customers, new customers, churn, ARPA).
+    model: ref('sem_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+        description: Customer (logo) id = account id of the ultimate parent account.
+    dimensions:
+      - name: customer_name
+        type: categorical
+        description: Name of the parent account.
+      - name: segment
+        type: categorical
+        description: Sales segment of the customer's parent account (SMB, MidMarket, Enterprise).
+      - name: region
+        type: categorical
+        description: Region of the customer's parent account (NA, EMEA, APAC, LATAM).
+      - name: country
+        type: categorical
+        description: Country of the customer's parent account.
+      - name: billing_currency
+        type: categorical
+        description: Default billing currency of the customer's parent account.
+      - name: created_date
+        type: time
+        description: Date the parent account was created.
+        type_params:
+          time_granularity: day
+
+  - name: plans
+    description: >
+      One row per price plan in the catalog (Starter, Growth, Scale, Enterprise; monthly and annual
+      variants). List price is the USD catalog price per seat per billing interval; actual contract
+      prices live on subscriptions and may differ by currency and discount.
+    model: ref('dim_plans')
+    entities:
+      - name: plan
+        type: primary
+        expr: plan_id
+        description: Plan id, e.g. PLN-GROWTH-M.
+    dimensions:
+      - name: plan_name
+        type: categorical
+        description: Plan display name including interval variant (e.g. "Growth Annual").
+      - name: plan_family
+        type: categorical
+        description: Plan tier ignoring billing interval (Starter, Growth, Scale, Enterprise).
+      - name: billing_interval
+        type: categorical
+        description: Billing interval of the plan (month or year).
+
+  - name: sales_reps
+    description: One row per sales rep. Linked only to opportunities (bookings, pipeline, win rate); billing metrics have no rep attribution.
+    model: ref('dim_sales_reps')
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+        description: Sales rep id (REP-xxx), the opportunity owner.
+    dimensions:
+      - name: rep_name
+        type: categorical
+        description: Sales rep full name.
+      - name: team
+        type: categorical
+        description: Sales team the rep belongs to (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      - name: region
+        type: categorical
+        description: Region the rep covers. This is the rep's territory, not the account's region.
+      - name: hired_at
+        type: time
+        description: Rep hire date.
+        type_params:
+          time_granularity: day

@@ -1,0 +1,59 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: Fact table with one row per subscription per month, capturing MRR, seat count, and subscription status. Includes subscription lifecycle events (active, trialing, canceled, paused).
+    model: fct_subscription_months
+    defaults:
+      agg_time_dimension: month_end
+
+    entities:
+      - name: subscription
+        type: foreign
+        role: subscription
+        expr: subscription_id
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: plan
+        type: foreign
+        role: plan
+        expr: plan_id
+
+    dimensions:
+      - name: subscription_id
+        description: Unique identifier for the subscription
+        type: categorical
+
+      - name: month_end
+        description: Last day of the month for which this subscription snapshot is recorded
+        type: time
+
+      - name: status
+        description: Subscription status - 'active' for active subscriptions, 'trialing' for trial period, 'canceled' for canceled subscriptions, 'paused' for paused subscriptions
+        type: categorical
+
+      - name: plan_id
+        description: ID of the plan the subscription is on
+        type: categorical
+
+      - name: billing_interval
+        description: Billing frequency - 'month' for monthly or 'year' for annual subscriptions
+        type: categorical
+
+    measures:
+      - name: mrr
+        description: Monthly recurring revenue for active subscriptions, in USD. Calculated as seats * unit_price_monthly * (1 - discount_pct/100) * usd_exchange_rate. Annual subscriptions are divided by 12 to get monthly value.
+        agg: sum
+        expr: seats * unit_price_minor * usd_per_unit / (CASE WHEN billing_interval = 'year' THEN 12 ELSE 1 END) / 100.0
+
+      - name: paying_subscriptions
+        description: Count of subscriptions with status='active', excluding trial and canceled subscriptions
+        agg: count_distinct
+        expr: CASE WHEN status = 'active' THEN subscription_id ELSE NULL END
+
+      - name: subscription_count
+        description: Total count of subscriptions (all statuses)
+        agg: count_distinct
+        expr: subscription_id

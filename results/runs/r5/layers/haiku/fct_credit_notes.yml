@@ -1,0 +1,46 @@
+version: 2
+
+semantic_models:
+  - name: credit_notes
+    description: Fact table with one row per credit note issued. Includes refunds for billing errors, service credits, and chargebacks.
+    model: fct_credit_notes
+    defaults:
+      agg_time_dimension: issued_date
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: invoice
+        type: foreign
+        role: invoice
+        expr: invoice_id
+      - name: credit_note
+        type: primary
+        role: credit_note
+        expr: credit_note_id
+
+    dimensions:
+      - name: credit_note_id
+        description: Unique identifier for the credit note
+        type: categorical
+
+      - name: issued_date
+        description: Date the credit note was issued
+        type: time
+
+      - name: reason
+        description: Reason for credit note - 'billing_error', 'service_credit', 'chargeback', or 'refund'
+        type: categorical
+
+    measures:
+      - name: refunds
+        description: Total refund amount in USD
+        agg: sum
+        expr: amount_minor * usd_per_unit / 100.0
+
+      - name: credit_note_count
+        description: Count of credit notes
+        agg: count_distinct
+        expr: credit_note_id

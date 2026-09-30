@@ -1,0 +1,29 @@
+version: 2
+
+semantic_models:
+  - name: sales_reps
+    description: Dimension table for sales representatives including team and region.
+    model: dim_sales_reps
+
+    entities:
+      - name: sales_rep
+        type: primary
+        role: sales_rep
+        expr: rep_id
+
+    dimensions:
+      - name: rep_id
+        description: Unique identifier for the sales representative
+        type: categorical
+
+      - name: rep_name
+        description: Full name of the sales representative
+        type: categorical
+
+      - name: team
+        description: Sales team name (e.g., NA Sales, EMEA Sales, Enterprise Sales)
+        type: categorical
+
+      - name: region
+        description: Geographic region assigned to the sales rep (NA, EU, APAC)
+        type: categorical

@@ -1,0 +1,175 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    model: ref('fct_opportunities')
+    description: >-
+      One row per sales opportunity. Every row references an external, non-deleted
+      account and a valid sales rep. Open rows carry an expected close date; closed
+      rows carry the actual close date.
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        type: time
+        expr: close_date
+        description: >-
+          Close date: actual for closed_won and closed_lost, expected for open.
+          Bookings and win rate are attributed here.
+        type_params:
+          time_granularity: day
+      - name: created_date
+        type: time
+        expr: created_date
+        description: Date the opportunity was created. Used for pipeline-age analysis.
+        type_params:
+          time_granularity: day
+      - name: opportunity_id
+        type: categorical
+        expr: opportunity_id
+        description: Opportunity identifier for drill-through to a single deal.
+      - name: stage
+        type: categorical
+        expr: stage
+        description: >-
+          Open, closed_won, or closed_lost. Bookings include closed_won only; win rate
+          divides by closed_won plus closed_lost.
+      - name: opportunity_type
+        type: categorical
+        expr: opportunity_type
+        description: >-
+          New for new-business deals, expansion for upsells into existing accounts.
+    measures:
+      - name: pipeline_amount_usd
+        agg: sum
+        expr: amount_usd
+        description: >-
+          Opportunity amount in USD as recorded on the opportunity. Covers all stages
+          at measure level; bookings metrics keep closed_won.
+      - name: opportunity_count
+        agg: count
+        expr: 1
+        description: >-
+          Count of opportunities. Covers all stages at measure level; win-rate metrics
+          filter to closed stages.
+
+  - name: sales_reps
+    model: ref('dim_sales_reps')
+    description: One row per sales rep with team and home region.
+    entities:
+      - name: sales_rep
+        type: primary
+        expr: rep_id
+    dimensions:
+      - name: rep_name
+        type: categorical
+        expr: rep_name
+        description: Sales representative display name.
+      - name: team
+        type: categorical
+        expr: team
+        description: Sales team the rep belongs to, for example NA Sales.
+      - name: region
+        type: categorical
+        expr: region
+        description: >-
+          Rep home region. Describes the seller and can differ from the buying
+          account's region on a deal.
+
+metrics:
+  - name: bookings
+    type: simple
+    type_params:
+      measure: pipeline_amount_usd
+    filter:
+      - "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+    description: >-
+      Closed-won bookings in USD at close date. Includes new and expansion deals.
+      Excludes open pipeline and lost deals.
+  - name: new_bookings
+    type: simple
+    type_params:
+      measure: pipeline_amount_usd
+    filter:
+      - "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+      - "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+    description: >-
+      Closed-won new-business bookings in USD at close date. Excludes expansion
+      upsells, open pipeline, and lost deals.
+  - name: expansion_bookings
+    type: simple
+    type_params:
+      measure: pipeline_amount_usd
+    filter:
+      - "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+      - "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+    description: >-
+      Closed-won expansion bookings in USD at close date. Excludes new-business deals,
+      open pipeline, and lost deals.
+  - name: opportunities
+    type: simple
+    type_params:
+      measure: opportunity_count
+    description: >-
+      Count of opportunities across all stages. Includes open pipeline plus closed
+      won and lost; every row sits on an external, non-deleted account.
+  - name: win_rate
+    type: ratio
+    type_params:
+      numerator:
+        name: opportunities
+        alias: won_opportunities
+        filter: "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+      denominator:
+        name: opportunities
+        alias: closed_opportunities
+        filter: "{{ Dimension('opportunity__stage') }} IN ('closed_won', 'closed_lost')"
+    description: >-
+      Share of closed opportunities won, by deal count: won divided by won plus lost.
+      Excludes open pipeline. Null when no deals closed.
+  - name: new_win_rate
+    type: ratio
+    type_params:
+      numerator:
+        name: opportunities
+        alias: new_won_opportunities
+        filter:
+          - "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+          - "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+      denominator:
+        name: opportunities
+        alias: new_closed_opportunities
+        filter:
+          - "{{ Dimension('opportunity__stage') }} IN ('closed_won', 'closed_lost')"
+          - "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+    description: >-
+      Share of closed new-business opportunities won, by deal count. Excludes expansion
+      deals and open pipeline. Null when no new deals closed.
+  - name: expansion_win_rate
+    type: ratio
+    type_params:
+      numerator:
+        name: opportunities
+        alias: expansion_won_opportunities
+        filter:
+          - "{{ Dimension('opportunity__stage') }} = 'closed_won'"
+          - "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+      denominator:
+        name: opportunities
+        alias: expansion_closed_opportunities
+        filter:
+          - "{{ Dimension('opportunity__stage') }} IN ('closed_won', 'closed_lost')"
+          - "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+    description: >-
+      Share of closed expansion opportunities won, by deal count. Excludes new-business
+      deals and open pipeline. Null when no expansion deals closed.

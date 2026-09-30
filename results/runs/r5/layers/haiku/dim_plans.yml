@@ -1,0 +1,29 @@
+version: 2
+
+semantic_models:
+  - name: plans
+    description: Dimension table for subscription plans including pricing and billing interval.
+    model: dim_plans
+
+    entities:
+      - name: plan
+        type: primary
+        role: plan
+        expr: plan_id
+
+    dimensions:
+      - name: plan_id
+        description: Unique identifier for the subscription plan
+        type: categorical
+
+      - name: plan_name
+        description: User-friendly name of the plan (e.g., Starter, Growth, Scale)
+        type: categorical
+
+      - name: plan_family
+        description: Plan family or tier (Starter, Growth, Scale)
+        type: categorical
+
+      - name: billing_interval
+        description: Billing frequency - 'month' for monthly or 'year' for annual billing
+        type: categorical

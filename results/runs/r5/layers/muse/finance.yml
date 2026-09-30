@@ -1,0 +1,278 @@
+version: 2
+
+semantic_models:
+  - name: invoices
+    model: ref('fct_invoices')
+    description: >-
+      One row per invoice. Subscription invoices bill a subscription period; services
+      invoices have no subscription. Includes every status; metrics filter to issued,
+      non-void invoices on external accounts.
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        expr: issued_date
+        description: >-
+          Invoice issue date. Billings are attributed here, not to the service period.
+        type_params:
+          time_granularity: day
+      - name: invoice_id
+        type: categorical
+        expr: invoice_id
+        description: Invoice identifier for drill-through to a single bill.
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: >-
+          Subscription for recurring seat-based bills, services for one-off work.
+          Services invoices never carry subscription MRR.
+      - name: status
+        type: categorical
+        expr: status
+        description: >-
+          Draft, open, paid, uncollectible, or void. Billings include open, paid, and
+          uncollectible; draft and void never count.
+      - name: currency
+        type: categorical
+        expr: currency
+        description: >-
+          Invoice currency. Amounts are stored in minor units of this currency and
+          converted to USD inside each measure at issue-date FX.
+    measures:
+      - name: billed_amount_usd
+        agg: sum
+        expr: (subtotal_minor - discount_minor) * usd_per_unit / power(10, minor_unit_exponent)
+        description: >-
+          Net invoiced amount in USD at issue-date FX: subtotal minus discount. Excludes
+          tax. Covers all statuses at measure level; metrics filter to issued invoices
+          on external accounts.
+
+  - name: revenue_recognition
+    model: ref('fct_revenue_recognition')
+    description: >-
+      One row per invoice per recognized calendar month. Subscription amounts spread
+      ratably across service days; services recognized in the issue month. Amounts are
+      net of discounts in pre-tax minor units.
+    defaults:
+      agg_time_dimension: recognized_month
+    entities:
+      - name: recognition
+        type: primary
+        expr: invoice_id || '|' || cast(recognized_month as varchar)
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: recognized_month
+        type: time
+        expr: recognized_month
+        description: >-
+          First day of the calendar month revenue is recognized in. Subscription
+          service spanning months is split; services land in the issue month.
+        type_params:
+          time_granularity: month
+      - name: invoice_id
+        type: categorical
+        expr: invoice_id
+        description: Source invoice identifier for drill-through.
+      - name: invoice_type
+        type: categorical
+        expr: invoice_type
+        description: >-
+          Subscription for ratably recognized recurring revenue, services for
+          point-in-time recognition at issue.
+      - name: status
+        type: categorical
+        expr: status
+        description: >-
+          Source invoice status. Recognized revenue includes open, paid, and
+          uncollectible; draft and void never count.
+      - name: currency
+        type: categorical
+        expr: currency
+        description: >-
+          Source invoice currency. Amounts convert to USD inside the measure at the
+          invoice's issue-date FX rate.
+    measures:
+      - name: recognized_amount_usd
+        agg: sum
+        expr: recognized_amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: >-
+          Recognized revenue in USD: the month's allocated amount converted at
+          issue-date FX. Net of discounts, excludes tax. Covers all statuses at measure
+          level; metrics filter to issued invoices on external accounts.
+
+  - name: payments
+    model: ref('fct_payments')
+    description: >-
+      One row per payment attempt against an invoice. Each paid invoice has exactly one
+      succeeded payment for its full total including tax; failed attempts carry no cash.
+    defaults:
+      agg_time_dimension: received_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: received_date
+        type: time
+        expr: received_date
+        description: >-
+          Date cash was received or the attempt failed. Cash collected is attributed
+          here, not to the invoice issue date.
+        type_params:
+          time_granularity: day
+      - name: payment_id
+        type: categorical
+        expr: payment_id
+        description: Payment identifier for drill-through.
+      - name: status
+        type: categorical
+        expr: status
+        description: >-
+          Succeeded or failed. Only succeeded payments move cash; failed attempts are
+          excluded from cash collected.
+      - name: method
+        type: categorical
+        expr: method
+        description: Payment method, one of ach, card, or wire.
+      - name: currency
+        type: categorical
+        expr: currency
+        description: >-
+          Payment currency, matching the invoice currency. Converted to USD inside the
+          measure at received-date FX.
+    measures:
+      - name: paid_amount_usd
+        agg: sum
+        expr: amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: >-
+          Payment amount in USD at received-date FX. Includes the full collected total
+          with tax. Covers all statuses at measure level; metrics keep succeeded
+          payments on external accounts.
+
+  - name: credit_notes
+    model: ref('fct_credit_notes')
+    description: >-
+      One row per credit note (refund) against a paid subscription invoice. At most one
+      credit note exists per invoice and never exceeds the invoice total.
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: credit_note
+        type: primary
+        expr: credit_note_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        expr: issued_date
+        description: Credit note issue date. Refunds are attributed here.
+        type_params:
+          time_granularity: day
+      - name: reason
+        type: categorical
+        expr: reason
+        description: >-
+          Billing_error, downgrade_adjustment, goodwill, or service_credit. Every
+          reason counts as a refund.
+      - name: currency
+        type: categorical
+        expr: currency
+        description: >-
+          Credit note currency, matching the invoice currency. Converted to USD inside
+          the measure at issue-date FX.
+    measures:
+      - name: credited_amount_usd
+        agg: sum
+        expr: amount_minor * usd_per_unit / power(10, minor_unit_exponent)
+        description: >-
+          Refunded amount in USD at issue-date FX. Includes every reason at measure
+          level; metrics keep external accounts.
+
+metrics:
+  - name: billings
+    type: simple
+    type_params:
+      measure: billed_amount_usd
+    filter:
+      - "{{ Dimension('invoice__status') }} IN ('open', 'paid', 'uncollectible')"
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Net invoiced billings in USD at issue-date FX. Includes subscription and services
+      invoices with status open, paid, or uncollectible, net of discounts and excluding
+      tax. Excludes draft and void invoices plus internal and deleted accounts.
+  - name: subscription_billings
+    type: simple
+    type_params:
+      measure: billed_amount_usd
+    filter:
+      - "{{ Dimension('invoice__invoice_type') }} = 'subscription'"
+      - "{{ Dimension('invoice__status') }} IN ('open', 'paid', 'uncollectible')"
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Net subscription billings in USD. Same rules as billings but limited to
+      subscription invoices. Excludes one-off services.
+  - name: services_billings
+    type: simple
+    type_params:
+      measure: billed_amount_usd
+    filter:
+      - "{{ Dimension('invoice__invoice_type') }} = 'services'"
+      - "{{ Dimension('invoice__status') }} IN ('open', 'paid', 'uncollectible')"
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Net one-off services billings in USD. Same rules as billings but limited to
+      services invoices. Excludes recurring subscription MRR.
+  - name: recognized_revenue
+    type: simple
+    type_params:
+      measure: recognized_amount_usd
+    filter:
+      - "{{ Dimension('recognition__status') }} IN ('open', 'paid', 'uncollectible')"
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Recognized revenue in USD: subscription amounts spread ratably across service
+      days plus services at issue, net of discounts and excluding tax. Includes source
+      invoices with status open, paid, or uncollectible. Excludes draft and void plus
+      internal and deleted accounts.
+  - name: cash_collected
+    type: simple
+    type_params:
+      measure: paid_amount_usd
+    filter:
+      - "{{ Dimension('payment__status') }} = 'succeeded'"
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Cash received in USD at received-date FX. Includes succeeded payments only, at
+      full invoice totals with tax. Excludes failed attempts plus internal and deleted
+      accounts.
+  - name: refunds
+    type: simple
+    type_params:
+      measure: credited_amount_usd
+    filter:
+      - "{{ Dimension('account__is_internal') }} = false"
+      - "{{ Dimension('account__is_deleted') }} = false"
+    description: >-
+      Refunds issued via credit notes in USD at issue-date FX, across all reasons.
+      Excludes internal and deleted accounts; voided invoices carry no credit note and
+      never appear.

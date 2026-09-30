@@ -1,0 +1,55 @@
+version: 2
+
+semantic_models:
+  - name: payments
+    description: Fact table with one row per payment received against an invoice. Includes payment method, status, and amount in original currency converted to USD.
+    model: fct_payments
+    defaults:
+      agg_time_dimension: received_date
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: invoice
+        type: foreign
+        role: invoice
+        expr: invoice_id
+      - name: payment
+        type: primary
+        role: payment
+        expr: payment_id
+
+    dimensions:
+      - name: payment_id
+        description: Unique identifier for the payment
+        type: categorical
+
+      - name: received_date
+        description: Date the payment was received
+        type: time
+
+      - name: status
+        description: Payment status - 'pending', 'cleared', 'failed', or 'disputed'
+        type: categorical
+
+      - name: method
+        description: Payment method - 'card', 'bank_transfer', 'check', or 'other'
+        type: categorical
+
+    measures:
+      - name: cash_collected
+        description: Amount of cash collected in USD
+        agg: sum
+        expr: amount_minor * usd_per_unit / 100.0
+
+      - name: cleared_cash
+        description: Amount of cleared/settled payments in USD
+        agg: sum
+        expr: CASE WHEN status = 'cleared' THEN amount_minor * usd_per_unit / 100.0 ELSE 0 END
+
+      - name: payment_count
+        description: Count of payments
+        agg: count_distinct
+        expr: payment_id

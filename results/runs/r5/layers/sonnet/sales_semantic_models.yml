@@ -1,0 +1,78 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      Sales opportunities for external accounts, one row per opportunity, with the owning rep's team and the
+      account's segment and region. Includes new and expansion opportunities in all stages (open, closed_won,
+      closed_lost). Bookings and win rate only count closed opportunities, attributed to close date. Excludes
+      internal/QA accounts. Amounts are in USD as recorded on the opportunity.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+    dimensions:
+      - name: close_date
+        type: time
+        type_params:
+          time_granularity: day
+        description: Actual or expected close date of the opportunity. For open opportunities this is a future expected date.
+      - name: opportunity_type
+        type: categorical
+        description: new (first deal with an account) or expansion (additional seats or plan upgrade for an existing account).
+      - name: stage
+        type: categorical
+        description: Opportunity stage, open, closed_won or closed_lost.
+      - name: sales_team
+        type: categorical
+        description: Sales team of the owning rep (NA Sales, EMEA Sales, APAC Sales, LATAM Sales).
+      - name: rep_region
+        type: categorical
+        description: Region of the owning sales rep.
+      - name: segment
+        type: categorical
+        description: Customer segment (SMB, MidMarket, Enterprise) of the account.
+      - name: region
+        type: categorical
+        description: Sales region (NA, EMEA, APAC, LATAM) of the account.
+      - name: country
+        type: categorical
+        description: Country of the account.
+    measures:
+      - name: won_amount_usd
+        description: >
+          Value in USD of closed_won opportunities (new and expansion) by close date. Excludes open and closed_lost
+          opportunities and internal accounts.
+        agg: sum
+        expr: won_amount_usd
+      - name: new_won_amount_usd
+        description: >
+          Value in USD of closed_won opportunities of type new by close date. Excludes expansion, open and
+          closed_lost opportunities and internal accounts.
+        agg: sum
+        expr: new_won_amount_usd
+      - name: won_opportunities
+        description: Count of closed_won opportunities (new and expansion). Excludes open and closed_lost.
+        agg: sum
+        expr: is_won
+      - name: closed_opportunities
+        description: Count of closed opportunities (closed_won plus closed_lost, new and expansion). Excludes open opportunities.
+        agg: sum
+        expr: is_closed
+      - name: new_won_opportunities
+        description: Count of closed_won opportunities of type new. Excludes expansion, open and closed_lost.
+        agg: sum
+        expr: is_new_won
+      - name: new_closed_opportunities
+        description: Count of closed opportunities of type new (won plus lost). Excludes expansion and open opportunities.
+        agg: sum
+        expr: is_new_closed

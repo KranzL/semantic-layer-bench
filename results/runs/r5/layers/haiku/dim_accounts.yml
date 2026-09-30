@@ -1,0 +1,51 @@
+version: 2
+
+semantic_models:
+  - name: accounts
+    description: Dimension table for customer accounts including company info, geography, and segment. Attributes include region, segment, country, billing currency, and account status.
+    model: dim_accounts
+    defaults:
+      agg_time_dimension: created_date
+
+    entities:
+      - name: account
+        type: primary
+        role: account
+        expr: account_id
+
+    dimensions:
+      - name: account_id
+        description: Unique identifier for the customer account
+        type: categorical
+
+      - name: account_name
+        description: Name of the customer account
+        type: categorical
+
+      - name: created_date
+        description: Date the account was created
+        type: time
+
+      - name: region
+        description: Geographic region of the account (NA, EU, APAC, LATAM)
+        type: categorical
+
+      - name: country
+        description: Country of the account
+        type: categorical
+
+      - name: segment
+        description: Market segment of the account (SMB, Mid-Market, Enterprise)
+        type: categorical
+
+      - name: billing_currency
+        description: Primary billing currency for the account (USD, EUR, GBP, etc.)
+        type: categorical
+
+      - name: is_deleted
+        description: Flag indicating if the account has been deleted (1 = deleted, 0 = active)
+        type: categorical
+
+      - name: parent_account_id
+        description: ID of the parent account if this is a child account, null for standalone accounts
+        type: categorical

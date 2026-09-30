@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: sem_fiscal_time_spine
+    description: >
+      Reference table for Relay's fiscal calendar, one row per calendar date from 2022-02-01 to
+      2027-01-31. The fiscal year starts on 1 February and is named for the calendar year in which
+      it ends, so FY2025 runs from 2024-02-01 to 2025-01-31. Fiscal months equal calendar months.
+      It is not registered as a MetricFlow time spine, so metrics cannot be grouped by fiscal
+      periods directly; filter metric_time to the fiscal date range instead.
+    columns:
+      - name: date_day
+        description: Calendar date, one row per day.
+      - name: fiscal_quarter_start
+        description: >
+          First day of the fiscal quarter containing the date. Fiscal quarters start on 1 February,
+          1 May, 1 August and 1 November; Q1 starts 1 February.
+      - name: fiscal_year_start
+        description: >
+          First day of the fiscal year containing the date, always 1 February. The fiscal year is
+          named for the following calendar year, so a start of 2024-02-01 is FY2025.

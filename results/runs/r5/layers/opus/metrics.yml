@@ -1,0 +1,224 @@
+version: 2
+
+metrics:
+  # ---------------------------------------------------------------- recurring revenue
+  - name: mrr
+    label: MRR (USD)
+    description: >
+      Monthly recurring revenue in USD at month end: seats x contracted unit price x (1 - discount)
+      for subscriptions in status active or past_due, annual plans divided by 12, converted at the
+      month-end FX rate. Excludes trialing and canceled subscriptions, internal/test and deleted
+      accounts, tax, one-off services and usage. A balance: at quarter/year grain it is the value in
+      the last month of the period, never a sum. Slice by account__* (billed account) or customer__*
+      (parent logo) attributes, plan__*, subscription_month__currency.
+    type: simple
+    type_params:
+      measure: mrr_usd
+
+  - name: arr
+    label: ARR (USD)
+    description: Annual recurring revenue = MRR x 12 at month end. Same inclusions/exclusions as mrr (active and past_due subscriptions only, no trials, services, usage, tax, internal or deleted accounts). Last month of the period at coarser grains.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+
+  - name: paid_seats
+    label: Paid seats
+    description: Seats on active or past_due subscriptions at month end. Excludes trialing and canceled subscriptions and internal/test and deleted accounts. Last month of the period at coarser grains.
+    type: simple
+    type_params:
+      measure: paid_seats
+
+  # ---------------------------------------------------------------- customers / logos
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Number of customers (logos) with at least one active or past_due subscription at month end.
+      A customer is the ultimate parent account, so subsidiaries are counted once with their parent.
+      Excludes trial-only customers and internal/test and deleted accounts. Last month of the period
+      at coarser grains. Slice by customer__segment / customer__region / customer__country.
+    type: simple
+    type_params:
+      measure: paying_customers
+
+  - name: arpa
+    label: ARPA (USD)
+    description: >
+      Average revenue per account = MRR / paying customers at month end, in USD per customer per
+      month. "Account" here means customer/logo (subsidiaries rolled into their parent). Excludes
+      trials and internal/test and deleted accounts. Slice only by customer__* dimensions so
+      numerator and denominator use the same attribution.
+    type: derived
+    type_params:
+      expr: mrr / nullif(paying_customers, 0)
+      metrics:
+        - name: mrr
+        - name: paying_customers
+
+  - name: new_customers
+    label: New customers
+    description: Customers (logos) whose first-ever paying month (first month-end with an active or past_due subscription) falls in the period. Includes trial conversions; excludes reactivated former customers, subsidiaries of existing customers, trials that never converted, and internal/test and deleted accounts. Summed over months.
+    type: simple
+    type_params:
+      measure: new_customers
+
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: Customers who paid in an earlier month, were not paying at the prior month end, and are paying again. Excludes new customers. Summed over months.
+    type: simple
+    type_params:
+      measure: reactivated_customers
+
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: Logo churn - customers paying at the prior month end with no active or past_due subscription at this month end. Downgrades and seat reductions that keep any paid subscription are not churn; trials that never convert are not churn. Excludes internal/test and deleted accounts. Summed over months.
+    type: simple
+    type_params:
+      measure: churned_customers
+
+  - name: beginning_paying_customers
+    label: Paying customers at start of period
+    description: Customers (logos) paying at the end of the month before the period begins; the denominator of logo churn rate.
+    type: simple
+    type_params:
+      measure: beginning_paying_customers
+
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Churned customers in the period / paying customers at the start of the period (prior month
+      end). At month grain this is monthly logo churn; at quarter/year grain it is churned logos
+      over the period divided by the opening base of the period (not an average monthly rate).
+      Customer = ultimate parent account; excludes internal/test and deleted accounts and trials.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: beginning_paying_customers
+
+  # ---------------------------------------------------------------- billing, revenue, cash
+  - name: billings
+    label: Billings (USD)
+    description: Amount invoiced in USD by invoice issue date, net of discounts and excluding tax, for issued invoices (open, paid, uncollectible). Includes subscription and services invoices; excludes draft and void invoices and internal/test and deleted accounts; not reduced by credit notes. FX at issue date.
+    type: simple
+    type_params:
+      measure: billings_usd
+
+  - name: billings_including_tax
+    label: Billings incl. tax (USD)
+    description: Gross invoice totals in USD including tax on issued invoices (open, paid, uncollectible) by issue date. Excludes draft/void invoices and internal/test and deleted accounts.
+    type: simple
+    type_params:
+      measure: billed_total_usd
+
+  - name: recognized_revenue
+    label: Recognized revenue (USD)
+    description: Revenue earned in the month in USD. Subscription invoices are recognized ratably by day over their service period, services invoices in full when issued. Only issued invoices (open, paid, uncollectible); excludes draft and void invoices, tax, and internal/test and deleted accounts; net of invoice discounts but not reduced by credit notes. FX at invoice issue date. Months after 2025-06 show still-deferred scheduled revenue.
+    type: simple
+    type_params:
+      measure: recognized_revenue_usd
+
+  - name: cash_collected
+    label: Cash collected (USD)
+    description: Cash received in USD from succeeded payments by date received (including the tax portion of invoices). Excludes failed payment attempts and internal/test and deleted accounts; not net of refunds/credit notes. FX at received date.
+    type: simple
+    type_params:
+      measure: cash_collected_usd
+
+  - name: failed_payments
+    label: Failed payments (USD)
+    description: Amount in USD of payment attempts that failed, by attempt date. Excludes succeeded payments and internal/test and deleted accounts.
+    type: simple
+    type_params:
+      measure: failed_payments_usd
+
+  - name: refunds
+    label: Refunds / credit notes (USD)
+    description: Value in USD of credit notes issued (refunds and credits for billing errors, downgrade adjustments, goodwill and service credits), by credit-note issue date, as a positive amount. Slice by credit_note__reason. Excludes internal/test and deleted accounts. FX at issue date.
+    type: simple
+    type_params:
+      measure: refunds_usd
+
+  - name: net_cash_collected
+    label: Cash collected net of refunds (USD)
+    description: cash_collected minus refunds (credit notes) in the same period, in USD. Excludes internal/test and deleted accounts.
+    type: derived
+    type_params:
+      expr: coalesce(cash_collected, 0) - coalesce(refunds, 0)
+      metrics:
+        - name: cash_collected
+        - name: refunds
+
+  # ---------------------------------------------------------------- usage
+  - name: billable_usage
+    label: Billable usage (API calls)
+    description: Number of billable API calls (api_call events) by usage date. Excludes non-billable health_check pings and internal/test and deleted accounts.
+    type: simple
+    type_params:
+      measure: billable_usage_quantity
+
+  # ---------------------------------------------------------------- sales
+  - name: bookings
+    label: Bookings (USD)
+    description: Contract value in USD of closed_won opportunities by close date, new-logo and expansion combined. Excludes open and closed_lost opportunities and internal/test and deleted accounts. Slice by sales_rep__team, sales_rep__region, opportunity__opportunity_type.
+    type: simple
+    type_params:
+      measure: bookings_usd
+
+  - name: new_bookings
+    label: New-logo bookings (USD)
+    description: Bookings from closed_won opportunities of type new (new-logo business) by close date. Excludes expansion deals, open and closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: bookings_usd
+    filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: expansion_bookings
+    label: Expansion bookings (USD)
+    description: Bookings from closed_won opportunities of type expansion (upsell to existing customers) by close date. Excludes new-logo deals, open and closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: bookings_usd
+    filter: "{{ Dimension('opportunity__opportunity_type') }} = 'expansion'"
+
+  - name: deals_won
+    label: Deals won
+    description: Number of closed_won opportunities (new and expansion) by close date.
+    type: simple
+    type_params:
+      measure: deals_won
+
+  - name: deals_closed
+    label: Deals closed
+    description: Number of closed opportunities (closed_won + closed_lost) by close date. Excludes open opportunities.
+    type: simple
+    type_params:
+      measure: deals_closed
+
+  - name: win_rate
+    label: Win rate
+    description: Closed_won opportunities / all closed opportunities (won + lost) by close date, counted by deal (not amount). New and expansion combined; open opportunities are excluded from both numerator and denominator.
+    type: ratio
+    type_params:
+      numerator: deals_won
+      denominator: deals_closed
+
+  - name: new_business_win_rate
+    label: New-business win rate
+    description: Win rate for new-logo opportunities only - closed_won / (closed_won + closed_lost) of type new, by close date, counted by deal. Excludes expansion and open opportunities.
+    type: ratio
+    type_params:
+      numerator:
+        name: deals_won
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+      denominator:
+        name: deals_closed
+        filter: "{{ Dimension('opportunity__opportunity_type') }} = 'new'"
+
+  - name: open_pipeline
+    label: Open pipeline (USD)
+    description: Contract value in USD of opportunities still open, by expected close date. Excludes closed_won and closed_lost opportunities.
+    type: simple
+    type_params:
+      measure: open_pipeline_usd

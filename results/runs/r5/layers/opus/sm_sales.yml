@@ -1,0 +1,71 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: >
+      One row per CRM opportunity on a reportable account (internal/test and soft-deleted accounts
+      excluded), all stages (open, closed_won, closed_lost). Amounts are contract values already in
+      USD as entered in the CRM. Dated by close date (actual close for closed deals, expected close
+      for open ones) unless created_date is requested.
+    model: ref('sem_opportunities')
+    defaults:
+      agg_time_dimension: close_date
+    entities:
+      - name: opportunity
+        type: primary
+        expr: opportunity_id
+        description: Opportunity id.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Account the opportunity is for.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (ultimate parent) of the account.
+      - name: sales_rep
+        type: foreign
+        expr: rep_id
+        description: Opportunity owner.
+    dimensions:
+      - name: close_date
+        type: time
+        description: Close date (actual for closed opportunities, expected for open ones).
+        type_params:
+          time_granularity: day
+      - name: created_date
+        type: time
+        description: Date the opportunity was created.
+        type_params:
+          time_granularity: day
+      - name: opportunity_type
+        type: categorical
+        description: new (new-logo business) or expansion (upsell to an existing customer).
+      - name: stage
+        type: categorical
+        description: open, closed_won or closed_lost.
+      - name: is_closed
+        type: categorical
+        description: True for closed_won and closed_lost.
+    measures:
+      - name: bookings_usd
+        description: Contract value in USD of closed_won opportunities, new and expansion. Excludes open and closed_lost.
+        agg: sum
+        expr: "case when stage = 'closed_won' then amount_usd else 0 end"
+      - name: open_pipeline_usd
+        description: Contract value in USD of opportunities still open, dated by expected close date. Excludes closed deals.
+        agg: sum
+        expr: "case when stage = 'open' then amount_usd else 0 end"
+      - name: deals_won
+        description: Number of closed_won opportunities.
+        agg: sum
+        expr: "case when stage = 'closed_won' then 1 else 0 end"
+      - name: deals_closed
+        description: Number of closed opportunities (closed_won + closed_lost). Excludes open opportunities.
+        agg: sum
+        expr: "case when stage in ('closed_won', 'closed_lost') then 1 else 0 end"
+      - name: opportunities_created
+        description: Number of opportunities created (any stage), dated by created date.
+        agg: count
+        expr: opportunity_id
+        agg_time_dimension: created_date

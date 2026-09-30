@@ -1,0 +1,39 @@
+version: 2
+
+semantic_models:
+  - name: date
+    description: Dimension table for dates with calendar and fiscal period information.
+    model: dim_date
+
+    dimensions:
+      - name: date_day
+        description: Calendar date
+        type: time
+
+      - name: calendar_month
+        description: First day of the calendar month
+        type: time
+
+      - name: calendar_month_end
+        description: Last day of the calendar month
+        type: time
+
+      - name: is_month_end
+        description: Flag indicating if this date is the last day of the month
+        type: categorical
+
+      - name: calendar_year
+        description: Calendar year (YYYY format)
+        type: categorical
+
+      - name: fiscal_year
+        description: Fiscal year for reporting
+        type: categorical
+
+      - name: fiscal_quarter
+        description: Fiscal quarter (Q1, Q2, Q3, Q4)
+        type: categorical
+
+      - name: fiscal_month
+        description: Fiscal month for reporting
+        type: categorical

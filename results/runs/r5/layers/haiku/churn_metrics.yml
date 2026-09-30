@@ -1,0 +1,51 @@
+version: 2
+
+semantic_models:
+  - name: churn_metrics
+    description: Helper table tracking customer cohorts and churn status by month. One row per account per month showing if customer was active, new, or churned.
+    model: churn_metrics
+    defaults:
+      agg_time_dimension: month_end
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+
+    dimensions:
+      - name: month_end
+        description: Last day of the month
+        type: time
+
+      - name: is_active_customer
+        description: Flag indicating if the account has an active subscription in this month (1 = yes, 0 = no)
+        type: categorical
+
+      - name: is_first_month
+        description: Flag indicating if this is the account's first month with any subscription status (1 = yes, 0 = no)
+        type: categorical
+
+      - name: is_new_customer
+        description: Flag indicating if this is the account's first month with an active subscription (1 = yes, 0 = no)
+        type: categorical
+
+      - name: is_churned_customer
+        description: Flag indicating if the account lost all active subscriptions this month (had active prior month, none this month)
+        type: categorical
+
+    measures:
+      - name: new_customers
+        description: Count of distinct accounts with is_new_customer = 1 (first month of active subscription)
+        agg: count_distinct
+        expr: CASE WHEN is_new_customer = 1 THEN account_id ELSE NULL END
+
+      - name: churned_customers
+        description: Count of distinct accounts with is_churned_customer = 1 (lost all active subscriptions)
+        agg: count_distinct
+        expr: CASE WHEN is_churned_customer = 1 THEN account_id ELSE NULL END
+
+      - name: active_customers
+        description: Count of distinct accounts with is_active_customer = 1 (has active subscription in month)
+        agg: count_distinct
+        expr: CASE WHEN is_active_customer = 1 THEN account_id ELSE NULL END

@@ -1,0 +1,41 @@
+version: 2
+
+semantic_models:
+  - name: revenue_recognition
+    description: Fact table with daily revenue recognition entries. Subscription revenue is recognized daily over the billing period, services revenue is recognized on invoice issue date.
+    model: fct_revenue_recognition
+    defaults:
+      agg_time_dimension: recognized_month
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: invoice
+        type: foreign
+        role: invoice
+        expr: invoice_id
+
+    dimensions:
+      - name: invoice_id
+        description: Unique identifier for the underlying invoice
+        type: categorical
+
+      - name: recognized_month
+        description: Month in which revenue is recognized
+        type: time
+
+      - name: invoice_type
+        description: Type of invoice - 'subscription' for recurring revenue or 'services' for one-time charges
+        type: categorical
+
+      - name: status
+        description: Invoice status - 'draft', 'sent', 'paid', or 'uncollectible'
+        type: categorical
+
+    measures:
+      - name: recognized_revenue
+        description: Total recognized revenue in USD. Subscription revenue is recognized daily over billing period.
+        agg: sum
+        expr: recognized_amount_minor * usd_per_unit / 100.0

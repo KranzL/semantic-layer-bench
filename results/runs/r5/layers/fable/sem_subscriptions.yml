@@ -1,0 +1,342 @@
+version: 2
+
+semantic_models:
+  - name: subscription_months
+    description: >
+      Month-end snapshot of paying subscriptions: one row per subscription per month-end on which
+      the subscription was in status active. Excludes subscriptions that were trialing, past_due
+      or canceled on that month-end (past_due subscriptions have an uncollectible invoice and never
+      return to active), and excludes Relay internal and soft-deleted accounts. A subscription that
+      started and ended between two month-ends never appears. Covers January 2023 to June 2025.
+    model: ref('sem_subscription_months')
+    defaults:
+      agg_time_dimension: snapshot_month
+    entities:
+      - name: subscription_month
+        type: primary
+        expr: subscription_month_id
+        description: Unique key of the snapshot row, the subscription id combined with the month-end date.
+      - name: account
+        type: foreign
+        expr: account_id
+        description: Billing account that holds the subscription.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the billing account rolls up to; the parent account when there is one.
+      - name: plan
+        type: foreign
+        expr: plan_id
+        description: Plan the subscription was on at that month-end. Changes when the subscription is upgraded or downgraded.
+    dimensions:
+      - name: snapshot_month
+        type: time
+        expr: month_start
+        type_params:
+          time_granularity: month
+        description: >
+          Calendar month of the snapshot, stored as the first day of the month. Values describe the
+          state at the end of the last day of that month, not activity during the month.
+      - name: currency
+        type: categorical
+        description: >
+          Currency the subscription is priced and billed in (USD, EUR, GBP or JPY). Measures stay in
+          USD when sliced by this dimension; it identifies the billing currency, not the reporting currency.
+      - name: billing_interval
+        type: categorical
+        description: Billing frequency of the plan at that month-end, month or year.
+      - name: is_discounted
+        type: categorical
+        description: True when the subscription had a contractual discount greater than zero at that month-end.
+    measures:
+      - name: mrr_usd
+        agg: sum
+        expr: mrr_usd
+        description: >
+          Monthly recurring revenue in USD at month-end: seats times unit price, less the
+          subscription discount, with annual plans divided by 12, converted at that month-end's FX
+          rate. Excludes tax, services and usage, and non-active subscriptions. Not additive over
+          time: for periods longer than a month the last month-end is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_customer_count
+        agg: count_distinct
+        expr: customer_id
+        description: >
+          Distinct customers (logos) with at least one active subscription at month-end. Child
+          accounts count once under their parent. Excludes trialing, past_due and canceled
+          subscriptions. For periods longer than a month the last month-end is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paying_account_count
+        agg: count_distinct
+        expr: account_id
+        description: >
+          Distinct billing accounts with at least one active subscription at month-end. Parent and
+          child accounts are counted separately. For periods longer than a month the last month-end is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: active_subscription_count
+        agg: count_distinct
+        expr: subscription_id
+        description: >
+          Distinct subscriptions in status active at month-end. Excludes trialing, past_due and
+          canceled subscriptions. For periods longer than a month the last month-end is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+      - name: paid_seat_count
+        agg: sum
+        expr: seats
+        description: >
+          Seats on active subscriptions at month-end. Excludes seats on trialing, past_due and
+          canceled subscriptions. For periods longer than a month the last month-end is used.
+        non_additive_dimension:
+          name: snapshot_month
+          window_choice: max
+
+  - name: customer_months
+    description: >
+      Customer lifecycle by month: one row per customer (logo) per month in which the customer was
+      paying at month-end or had been paying at the previous month-end. A customer is paying when
+      it has at least one active subscription across all its billing accounts. Excludes Relay
+      internal and soft-deleted accounts, and months where the customer was paying at neither
+      month-end. Covers January 2023 to June 2025.
+    model: ref('sem_customer_months')
+    defaults:
+      agg_time_dimension: movement_month
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+        description: Unique key of the row, the customer id combined with the month.
+      - name: customer
+        type: foreign
+        expr: customer_id
+        description: Customer (logo) the row describes; child accounts are rolled up into their parent.
+    dimensions:
+      - name: movement_month
+        type: time
+        expr: month_start
+        type_params:
+          time_granularity: month
+        description: >
+          Calendar month of the movement, stored as the first day of the month. Movements compare
+          the end of this month with the end of the previous month.
+      - name: customer_movement
+        type: categorical
+        description: >
+          What happened to the customer in the month. new is paying at month-end for the first time
+          ever; reactivated is paying again after at least one month-end of not paying; retained is
+          paying at both this and the previous month-end; churned is paying at the previous
+          month-end but not this one.
+      - name: first_paying_month
+        type: time
+        type_params:
+          time_granularity: month
+        description: First month in which the customer was paying at month-end, its acquisition cohort. Stored as the first day of that month.
+    measures:
+      - name: new_customer_count
+        agg: sum
+        expr: case when customer_movement = 'new' then 1 else 0 end
+        description: >
+          Customers paying at month-end for the first time ever. Excludes reactivated customers,
+          trials that have not converted, and customers that started and canceled between two month-ends.
+      - name: reactivated_customer_count
+        agg: sum
+        expr: case when customer_movement = 'reactivated' then 1 else 0 end
+        description: Customers paying at month-end who had paid before but were not paying at the previous month-end. Excludes first-time customers.
+      - name: churned_customer_count
+        agg: sum
+        expr: case when customer_movement = 'churned' then 1 else 0 end
+        description: >
+          Customers that were paying at the previous month-end and have no active subscription on
+          any billing account at this month-end, including those that moved to past_due. Excludes
+          downgrades, seat reductions and the loss of one of several subscriptions.
+      - name: starting_customer_count
+        agg: sum
+        expr: case when was_paying_prior_month then 1 else 0 end
+        description: >
+          Customers paying at the start of the period, meaning at the previous month-end. For
+          periods longer than a month the first month is used. The denominator of logo churn rate.
+        non_additive_dimension:
+          name: movement_month
+          window_choice: min
+      - name: new_mrr_usd
+        agg: sum
+        expr: case when customer_movement = 'new' then mrr_change_usd else 0 end
+        description: Month-end MRR in USD of customers paying for the first time ever. Excludes reactivated and existing customers.
+      - name: reactivation_mrr_usd
+        agg: sum
+        expr: case when customer_movement = 'reactivated' then mrr_change_usd else 0 end
+        description: Month-end MRR in USD of customers that returned after at least one month-end of not paying. Excludes first-time customers.
+      - name: expansion_mrr_usd
+        agg: sum
+        expr: case when customer_movement = 'retained' and mrr_change_usd > 0 then mrr_change_usd else 0 end
+        description: >
+          Increase in MRR in USD from retained customers whose MRR rose since the previous
+          month-end. Includes seat additions, upgrades, discount removal and favourable FX movement
+          on non-USD subscriptions. Excludes new and reactivated customers.
+      - name: contraction_mrr_usd
+        agg: sum
+        expr: case when customer_movement = 'retained' and mrr_change_usd < 0 then -mrr_change_usd else 0 end
+        description: >
+          Decrease in MRR in USD, as a positive number, from retained customers whose MRR fell
+          since the previous month-end. Includes seat reductions, downgrades, new discounts and
+          adverse FX movement. Excludes customers that churned entirely.
+      - name: churned_mrr_usd
+        agg: sum
+        expr: case when customer_movement = 'churned' then prior_mrr_usd else 0 end
+        description: Previous month-end MRR in USD, as a positive number, of customers that churned in the month. Excludes contraction from customers that are still paying.
+
+metrics:
+  - name: mrr
+    label: MRR
+    description: >
+      Monthly recurring revenue in USD at month-end from active subscriptions: seats times unit
+      price less discount, annual plans divided by 12, converted at the month-end FX rate. Excludes
+      trialing, past_due and canceled subscriptions, tax, services and usage, and Relay internal
+      and soft-deleted accounts. A point-in-time balance: a quarter or year shows its last month-end.
+    type: simple
+    type_params:
+      measure: mrr_usd
+  - name: arr
+    label: ARR
+    description: >
+      Annual recurring revenue in USD, defined as month-end MRR times 12. Same inclusions and
+      exclusions as MRR. It is a run rate, not revenue or billings for the year.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+  - name: paying_customers
+    label: Paying customers
+    description: >
+      Distinct customers (logos) with at least one active subscription at month-end. Child accounts
+      count once under their parent, so slice by customer__segment or customer__region. Excludes
+      trialing, past_due and canceled subscriptions and Relay internal and soft-deleted accounts.
+      A quarter or year shows its last month-end.
+    type: simple
+    type_params:
+      measure: paying_customer_count
+  - name: paying_accounts
+    label: Paying billing accounts
+    description: >
+      Distinct billing accounts with at least one active subscription at month-end, counting parent
+      and child accounts separately. Excludes trialing, past_due and canceled subscriptions and
+      Relay internal and soft-deleted accounts. Use paying_customers for logo counts.
+    type: simple
+    type_params:
+      measure: paying_account_count
+  - name: active_subscriptions
+    label: Active subscriptions
+    description: >
+      Distinct subscriptions in status active at month-end. Excludes trialing, past_due and
+      canceled subscriptions and Relay internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: active_subscription_count
+  - name: paid_seats
+    label: Paid seats
+    description: >
+      Seats on active subscriptions at month-end. Excludes seats on trialing, past_due and canceled
+      subscriptions and on Relay internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: paid_seat_count
+  - name: arpa
+    label: ARPA
+    description: >
+      Average revenue per account in USD: month-end MRR divided by paying customers (logos) at the
+      same month-end. A monthly figure, not annualised. Child accounts are combined with their
+      parent. Same exclusions as MRR and paying customers.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: paying_customers
+  - name: new_customers
+    label: New customers
+    description: >
+      Customers (logos) paying at month-end for the first time ever, counted in the month they
+      first appear. Excludes reactivated customers, unconverted trials, new child accounts of an
+      existing customer, and Relay internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: new_customer_count
+  - name: reactivated_customers
+    label: Reactivated customers
+    description: >
+      Customers paying at month-end who had paid in the past but were not paying at the previous
+      month-end. Excludes first-time customers, which are counted in new_customers.
+    type: simple
+    type_params:
+      measure: reactivated_customer_count
+  - name: churned_customers
+    label: Churned customers (logo churn)
+    description: >
+      Logo churn: customers that were paying at the previous month-end and have no active
+      subscription on any billing account at this month-end, including customers that went
+      past_due. Excludes downgrades and partial cancellations, and Relay internal and soft-deleted accounts.
+    type: simple
+    type_params:
+      measure: churned_customer_count
+  - name: starting_customers
+    label: Customers at start of period
+    description: >
+      Customers (logos) paying at the start of the period, which is the previous month-end. For a
+      quarter or year it is the count at the start of the first month. Excludes customers acquired
+      during the period.
+    type: simple
+    type_params:
+      measure: starting_customer_count
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: >
+      Share of customers lost: churned customers in the period divided by customers paying at the
+      start of the period. A fraction between 0 and 1, not annualised. Counts logos, not revenue,
+      and excludes customers acquired during the period from the denominator.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: starting_customers
+  - name: new_mrr
+    label: New MRR
+    description: Month-end MRR in USD added by customers paying for the first time ever. Excludes reactivations and expansion of existing customers.
+    type: simple
+    type_params:
+      measure: new_mrr_usd
+  - name: reactivation_mrr
+    label: Reactivation MRR
+    description: Month-end MRR in USD added by customers that returned after at least one month-end of not paying. Excludes first-time customers.
+    type: simple
+    type_params:
+      measure: reactivation_mrr_usd
+  - name: expansion_mrr
+    label: Expansion MRR
+    description: >
+      Increase in MRR in USD from retained customers whose MRR rose since the previous month-end,
+      from seats, upgrades, discount changes or FX movement. Excludes new and reactivated customers.
+    type: simple
+    type_params:
+      measure: expansion_mrr_usd
+  - name: contraction_mrr
+    label: Contraction MRR
+    description: >
+      Decrease in MRR in USD, shown as a positive number, from retained customers whose MRR fell
+      since the previous month-end, from seats, downgrades, discount changes or FX movement.
+      Excludes customers that churned entirely.
+    type: simple
+    type_params:
+      measure: contraction_mrr_usd
+  - name: churned_mrr
+    label: Churned MRR
+    description: >
+      Previous month-end MRR in USD, shown as a positive number, of customers that churned in the
+      month. Excludes contraction from customers that are still paying.
+    type: simple
+    type_params:
+      measure: churned_mrr_usd

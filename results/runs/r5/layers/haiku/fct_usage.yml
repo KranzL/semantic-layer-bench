@@ -1,0 +1,34 @@
+version: 2
+
+semantic_models:
+  - name: usage
+    description: Fact table with one row per usage event. Tracks usage-based metering events by date and type (API calls, health checks, etc).
+    model: fct_usage_daily
+    defaults:
+      agg_time_dimension: usage_date
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+
+    dimensions:
+      - name: usage_date
+        description: Date of the usage event
+        type: time
+
+      - name: event_type
+        description: Type of usage event - 'api_call', 'health_check', or other tracked event types
+        type: categorical
+
+    measures:
+      - name: billable_usage
+        description: Sum of billable usage quantity for the period. Includes API calls and other metered events.
+        agg: sum
+        expr: quantity
+
+      - name: usage_count
+        description: Count of usage events
+        agg: count_distinct
+        expr: usage_id

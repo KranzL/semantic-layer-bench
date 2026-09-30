@@ -1,0 +1,79 @@
+version: 2
+
+semantic_models:
+  - name: opportunities
+    description: Fact table with one row per sales opportunity. Tracks deal pipeline by type (new business vs expansion), stage (open, won, lost), and amount. New bookings are new opportunities, expansion bookings are from existing customers.
+    model: fct_opportunities
+    defaults:
+      agg_time_dimension: created_date
+
+    entities:
+      - name: account
+        type: foreign
+        role: account
+        expr: account_id
+      - name: sales_rep
+        type: foreign
+        role: sales_rep
+        expr: rep_id
+      - name: opportunity
+        type: primary
+        role: opportunity
+        expr: opportunity_id
+
+    dimensions:
+      - name: opportunity_id
+        description: Unique identifier for the opportunity
+        type: categorical
+
+      - name: created_date
+        description: Date the opportunity was created
+        type: time
+
+      - name: close_date
+        description: Date the opportunity was closed (won or lost)
+        type: time
+
+      - name: opportunity_type
+        description: Type of opportunity - 'new' for new business or 'expansion' for expansion from existing customers
+        type: categorical
+
+      - name: stage
+        description: Deal stage - 'open', 'closed_won', 'closed_lost', or intermediate stages
+        type: categorical
+
+    measures:
+      - name: bookings
+        description: Total booking amount in USD for won opportunities (closed_won stage)
+        agg: sum
+        expr: CASE WHEN stage = 'closed_won' THEN amount_usd ELSE 0 END
+
+      - name: new_bookings
+        description: Total new business bookings (new opportunities with closed_won stage) in USD
+        agg: sum
+        expr: CASE WHEN opportunity_type = 'new' AND stage = 'closed_won' THEN amount_usd ELSE 0 END
+
+      - name: expansion_bookings
+        description: Total expansion bookings from existing customers (expansion opportunities with closed_won stage) in USD
+        agg: sum
+        expr: CASE WHEN opportunity_type = 'expansion' AND stage = 'closed_won' THEN amount_usd ELSE 0 END
+
+      - name: opportunity_count
+        description: Total count of opportunities (all stages)
+        agg: count_distinct
+        expr: opportunity_id
+
+      - name: open_opportunities_count
+        description: Count of open opportunities (stage != 'closed_won' and != 'closed_lost')
+        agg: count_distinct
+        expr: CASE WHEN stage NOT IN ('closed_won', 'closed_lost') THEN opportunity_id ELSE NULL END
+
+      - name: won_opportunities_count
+        description: Count of won opportunities (stage = 'closed_won')
+        agg: count_distinct
+        expr: CASE WHEN stage = 'closed_won' THEN opportunity_id ELSE NULL END
+
+      - name: pipeline
+        description: Total pipeline value including open, won, and lost opportunities in USD
+        agg: sum
+        expr: amount_usd
