@@ -6,7 +6,7 @@ import time
 import uuid
 
 CLAUDE_MODELS = {"haiku": "haiku", "sonnet": "sonnet", "opus": "opus", "fable": "fable"}
-LIMIT_MARKERS = ("usage limit", "rate limit", "limit reached", "hit your limit", "session limit", "hit your session", "quota", "transport error", "error sending request")
+LIMIT_MARKERS = ("usage limit", "rate limit", "limit reached", "hit your limit", "session limit", "hit your session", "quota", "transport error", "error sending request", "reached your")
 
 
 def extract_json(text):
