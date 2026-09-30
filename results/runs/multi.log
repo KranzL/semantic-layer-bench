@@ -1,0 +1,14 @@
+=== starting r3 Mon Sep 28 22:51:48 EDT 2026 ===
+=== finished r3 Tue Sep 29 02:10:10 EDT 2026 ===
+ create mode 100644 results/runs/r3/report.md
+=== starting r4 Tue Sep 29 02:10:10 EDT 2026 ===
+./replicate.sh: line 48:  2725 Terminated: 15          ../.venv/bin/python run_queries.py --run "$RUN" --concurrency 6 >> "$BASE/logs/queries.out" 2>&1
+./replicate_multi.sh: line 2: 97341 Terminated: 15          caffeinate -i ./replicate.sh "$RUN"
+=== finished r4 Tue Sep 29 04:56:34 EDT 2026 ===
+=== starting r4 Tue Sep 29 04:57:06 EDT 2026 ===
+=== finished r4 Tue Sep 29 13:53:11 EDT 2026 ===
+ create mode 100644 results/runs/r4/report.md
+=== starting r5 Tue Sep 29 13:53:11 EDT 2026 ===
+=== finished r5 Tue Sep 29 21:35:56 EDT 2026 ===
+ create mode 100644 results/runs/r5/report.md
+ALL_RUNS_DONE Tue Sep 29 21:35:56 EDT 2026
